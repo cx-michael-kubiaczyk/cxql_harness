@@ -5,6 +5,52 @@ import (
 	"github.com/cxpsemea/cxql-harness/internal/tooldef"
 )
 
+// notepadTool returns the single edit_notes tool definition for use in
+// dedicated note-taking LLM turns (not part of availableTools).
+func notepadTool() []llm.ToolDef {
+	return []llm.ToolDef{{
+		Name:        tooldef.ToolEditNotes,
+		Description: "Create, update, or delete notes in your scratchpad. Use this to record findings, decisions, and observations for later reference.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"notes_to_create": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"type":    map[string]any{"type": "string", "enum": []string{"Task", "Finding"}, "description": "Category of the note"},
+							"content": map[string]any{"type": "string"},
+						},
+						"required": []string{"type", "content"},
+					},
+				},
+				"notes_to_delete": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"id": map[string]any{"type": "string"},
+						},
+						"required": []string{"id"},
+					},
+				},
+				"notes_to_update": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"id":      map[string]any{"type": "string"},
+							"content": map[string]any{"type": "string", "description": "New replacement content"},
+						},
+						"required": []string{"id", "content"},
+					},
+				},
+			},
+		},
+	}}
+}
+
 // availableTools returns the tool definitions exposed to the LLM at each
 // CHOOSE_ACTION turn. SaveQuery and CheckOriginalFinding are intentionally
 // omitted — the harness calls them automatically after a successful TestQuery.

@@ -17,6 +17,7 @@ type Harness struct {
 	llm            llm.LLM
 	maxIter        int
 	queryOriginals map[string]string // queryKey -> original CxQL, saved before first edit
+	notepad        *Notepad
 }
 
 func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int) *Harness {
@@ -26,6 +27,7 @@ func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int) 
 		llm:            llmClient,
 		maxIter:        maxIter,
 		queryOriginals: make(map[string]string),
+		notepad:        new(Notepad),
 	}
 }
 
