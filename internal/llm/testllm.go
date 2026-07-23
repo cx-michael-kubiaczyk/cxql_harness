@@ -30,16 +30,25 @@ func NewTestLLM(logger *logrus.Logger) LLM {
 					},
 				},
 			}},
+			{ToolCalls: []ToolCall{
+				{
+					ID:   "update-notes",
+					Name: tooldef.ToolEditNotes,
+					Args: map[string]any{},
+				},
+			}},
 		},
 	}
 }
 
 func (c *testLLM) Chat(ctx context.Context, messages []Message, tools []ToolDef) (Response, error) {
 	msg, _ := json.MarshalIndent(messages, "", "  ")
-	c.logger.Infof("LLM Receives:\n%s", msg)
+	c.logger.Info("LLM Receives:\nPrompt:\n", string(msg))
+	msg, _ = json.MarshalIndent(tools, "", "  ")
+	c.logger.Info("Tools:\n", string(msg))
 	response := c.nextResponse()
 	msg, _ = json.MarshalIndent(response, "", "  ")
-	c.logger.Infof("LLM Responds:\n%s", msg)
+	c.logger.Info("LLM Responds:\n", string(msg))
 	return response, nil
 }
 

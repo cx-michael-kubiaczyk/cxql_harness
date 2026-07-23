@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -70,15 +71,18 @@ func (h *Harness) runLoop(ctx context.Context) error {
 	if strings.HasPrefix(findingDetails, "Error:") {
 		return fmt.Errorf("Error while getting finding details. %s", findingDetails)
 	}
-	messages := MessageHistory{}
+	messages := NewHistory()
 
 	system := fmt.Sprintf("You are an agent in charge of updating C# code which is used to evaluate source code and discover vulnerabilities.\n%s\n%s\n",
 		findingDetails,
 		h.mcp.GetHLD(),
 	)
+	messages.SetSystem(system)
 
 	for i := 0; i < h.maxIter; i++ {
-		err := h.loopStep(ctx, system, messages)
+		messages.SetChangelog(h.getChangelog())
+		messages.SetNotes(h.getNotes())
+		err := h.loopStep(ctx, messages)
 		if err != nil {
 			return fmt.Errorf("failed step: %s", err)
 		}
@@ -93,13 +97,12 @@ func (h *Harness) runLoop(ctx context.Context) error {
 // each iteration will be a tool call until the process finishes
 // the tool calls can be: get query info, run query, and test query
 // the tool call updates the back-end state
-func (h *Harness) loopStep(ctx context.Context, system string, messages MessageHistory) error {
-	system += h.getLastQueryInfo() + "\n"
-	system += h.mcp.GetCodeSnippets()
+func (h *Harness) loopStep(ctx context.Context, messages MessageHistory) error {
+	//system += h.getLastQueryInfo() + "\n"
+	//system += h.mcp.GetCodeSnippets()
 	// add system message to message history object?
 
-	messages.EnsureUserTurn()
-	resp, err := h.llm.Chat(ctx, messages.History(system), availableTools())
+	resp, err := h.llm.Chat(ctx, messages.History(promptChooseAction), availableTools())
 	if err != nil {
 		return fmt.Errorf("LLM call: %w", err)
 	}
@@ -129,8 +132,11 @@ func (h *Harness) handleGetQueryInfo(ctx context.Context, messages *MessageHisto
 	lang, group, name := strArg(call.Args, "language"), strArg(call.Args, "group"), strArg(call.Args, "query_name")
 	h.logger.Infof("Call to get query info: %s.%s.%s", lang, group, name)
 
-	//info := h.mcp.GetQueryInfo(lang, group, name)
+	// loop over querygetinfo, if it starts with "Error:" then retry (with error in history)
+	messages.AppendToolResult(tooldef.ToolGetQueryInfo, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolGetQueryInfo)+h.mcp.GetQueryInfo(lang, group, name))
 
+	// once done, we call the after-tool function
+	h.afterTool(ctx, messages)
 	return nil
 }
 
@@ -148,14 +154,53 @@ func (h *Harness) handleTestQuery(ctx context.Context, messages *MessageHistory,
 	//lang, group, name, code := strArg(call.Args, "language"), strArg(call.Args, "group"), strArg(call.Args, "query_name"), strArg(call.Args, "code")
 
 	//results := h.mcp.TestQuery(lang, group, name, code)
-
 	// Finding persists — show the status so the LLM can continue reasoning.
 	//h.appendUser(fmt.Sprintf("Finding still present after save: %s\nContinue exploring.", findingStatus))
 	return nil
 }
 
+func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory) error {
+
+	resp, err := h.llm.Chat(ctx, messages.History(promptNotesOnResults), notepadTool())
+	if err != nil {
+		return fmt.Errorf("LLM call: %w", err)
+	}
+
+	if len(resp.ToolCalls) == 0 {
+		// LLM produced a plain text response — it may be an error
+		return fmt.Errorf("No tool call generated, response was: %s", resp.Content)
+	}
+
+	call := resp.ToolCalls[0]
+
+	if call.Name == tooldef.ToolEditNotes {
+		return h.handleNotes(ctx, messages, call)
+	} else {
+		return fmt.Errorf("unknown tool: %s", call.Name)
+	}
+
+	return nil
+}
+
+func (h *Harness) handleNotes(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
+	//summary, notes_add, notes_del, notes_upd := strArg(call.Args, "summary"), strArg(call.Args, "notes_to_create"), strArg(call.Args, "notes_to_delete"), strArg(call.Args, "notes_to_update")
+
+	return nil
+}
+
 func (h *Harness) getLastQueryInfo() string {
 	return ""
+}
+
+func (h *Harness) getNotes() string {
+	str, _ := json.Marshal(h.notepad.All())
+	return "You have the following notes in your notepad:\n" + string(str)
+}
+
+func (h *Harness) getChangelog() string {
+	changelog := []string{}
+	str, _ := json.Marshal(changelog)
+	return "Changelog:\n" + string(str)
 }
 
 func (h *Harness) TestsPassed() bool {

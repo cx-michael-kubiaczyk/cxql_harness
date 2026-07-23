@@ -1,6 +1,8 @@
 package harness
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type Note struct {
 	ID      string

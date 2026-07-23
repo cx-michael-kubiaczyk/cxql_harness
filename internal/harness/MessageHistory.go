@@ -3,20 +3,35 @@ package harness
 import "github.com/cxpsemea/cxql-harness/internal/llm"
 
 type MessageHistory struct {
-	messages []llm.Message
+	system    llm.Message
+	changelog llm.Message
+	notes     llm.Message
+	messages  []llm.Message
 }
 
-func (h *MessageHistory) EnsureUserTurn() {
-	if len(h.messages) == 0 || h.messages[len(h.messages)-1].Role == llm.RoleAssistant {
-		h.AppendUser(promptChooseAction)
+func NewHistory() MessageHistory {
+	return MessageHistory{
+		system:    llm.Message{Role: llm.RoleSystem},
+		changelog: llm.Message{Role: llm.RoleTool},
+		notes:     llm.Message{Role: llm.RoleTool},
 	}
 }
 
-func (h *MessageHistory) History(system string) []llm.Message {
-	return append([]llm.Message{{
-		Role:    llm.RoleSystem,
-		Content: system,
-	}}, h.messages...)
+func (h *MessageHistory) History(prompt string) []llm.Message {
+	return append(
+		[]llm.Message{h.system, h.changelog, h.notes},
+		append(h.messages, llm.Message{Role: llm.RoleUser, Content: prompt})...,
+	)
+}
+
+func (h *MessageHistory) SetSystem(system string) {
+	h.system.Content = system
+}
+func (h *MessageHistory) SetChangelog(changelog string) {
+	h.changelog.Content = changelog
+}
+func (h *MessageHistory) SetNotes(notes string) {
+	h.notes.Content = notes
 }
 
 func (h *MessageHistory) AppendAssistant(resp llm.Response) {
