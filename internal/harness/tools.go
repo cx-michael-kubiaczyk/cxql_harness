@@ -10,7 +10,7 @@ import (
 func notepadTool() []llm.ToolDef {
 	return []llm.ToolDef{
 		{
-			Name:        tooldef.ToolEditNotes,
+			Name:        tooldef.ToolReview,
 			Description: "Create, update, or delete notes in your scratchpad. Use this to record findings, decisions, and observations for later reference. Write a summary of the result with respect to the purpose of the tool call and indicate if it was useful.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -28,14 +28,8 @@ func notepadTool() []llm.ToolDef {
 						},
 					},
 					"notes_to_delete": map[string]any{
-						"type": "array",
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"id": map[string]any{"type": "string"},
-							},
-							"required": []string{"id"},
-						},
+						"type":  "array",
+						"items": map[string]any{"type": "string"},
 					},
 					"notes_to_update": map[string]any{
 						"type": "array",
@@ -49,6 +43,7 @@ func notepadTool() []llm.ToolDef {
 						},
 					},
 				},
+				"required": []string{"summary"},
 			},
 		},
 	}
@@ -65,11 +60,12 @@ func availableTools() []llm.ToolDef {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"purpose":    map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Information Gathering"},
 					"language":   map[string]any{"type": "string", "description": "Programming language, e.g. Java, CSharp"},
 					"group":      map[string]any{"type": "string", "description": "Query group/category, e.g. CxDefaultQueryJava"},
 					"query_name": map[string]any{"type": "string", "description": "Query name, e.g. Reflected_XSS"},
 				},
-				"required": []string{"language", "group", "query_name"},
+				"required": []string{"purpose", "language", "group", "query_name"},
 			},
 		},
 		{
@@ -78,11 +74,12 @@ func availableTools() []llm.ToolDef {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"purpose":    map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Information Gathering"},
 					"language":   map[string]any{"type": "string"},
 					"group":      map[string]any{"type": "string"},
 					"query_name": map[string]any{"type": "string"},
 				},
-				"required": []string{"language", "group", "query_name"},
+				"required": []string{"purpose", "language", "group", "query_name"},
 			},
 		},
 		{
@@ -91,12 +88,13 @@ func availableTools() []llm.ToolDef {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"purpose":    map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Test behavior when matching additional input XYZ"},
 					"language":   map[string]any{"type": "string"},
 					"group":      map[string]any{"type": "string"},
 					"query_name": map[string]any{"type": "string"},
 					"code":       map[string]any{"type": "string", "description": "Complete CxQL source code for the query"},
 				},
-				"required": []string{"language", "group", "query_name", "code"},
+				"required": []string{"purpose", "language", "group", "query_name", "code"},
 			},
 		},
 	}

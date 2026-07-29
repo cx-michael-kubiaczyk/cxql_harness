@@ -4,5 +4,5 @@ const (
 	ToolGetQueryInfo = "get_query_info"
 	ToolRunQuery     = "run_query"
 	ToolTestQuery    = "test_query"
-	ToolEditNotes    = "edit_notes"
+	ToolReview       = "tool_review"
 )

@@ -2,6 +2,8 @@ package harness
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 )
 
 type Note struct {
@@ -15,11 +17,28 @@ type Notepad struct {
 	nextID int
 }
 
-func (np *Notepad) Create(noteType, content string) Note {
+func NewNotepad() *Notepad {
+	return &Notepad{
+		notes:  []Note{},
+		nextID: 1,
+	}
+}
+
+func (np *Notepad) Create(noteType, content string) {
+	n := Note{ID: fmt.Sprintf("note-%04d", np.nextID), Type: noteType, Content: content}
 	np.nextID++
-	n := Note{ID: fmt.Sprintf("note-%d", np.nextID), Type: noteType, Content: content}
 	np.notes = append(np.notes, n)
-	return n
+	slices.SortFunc(np.notes, func(a, b Note) int {
+		if a.Type == b.Type {
+			return strings.Compare(a.ID, b.ID)
+		} else {
+			if a.Type == "Task" {
+				return -1
+			} else {
+				return 1
+			}
+		}
+	})
 }
 
 func (np *Notepad) Delete(id string) {

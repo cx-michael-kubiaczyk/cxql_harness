@@ -19,6 +19,7 @@ type Harness struct {
 	maxIter        int
 	queryOriginals map[string]string // queryKey -> original CxQL, saved before first edit
 	notepad        *Notepad
+	changelog      *Changelog
 }
 
 func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int) *Harness {
@@ -28,7 +29,8 @@ func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int) 
 		llm:            llmClient,
 		maxIter:        maxIter,
 		queryOriginals: make(map[string]string),
-		notepad:        new(Notepad),
+		notepad:        NewNotepad(),
+		changelog:      NewChangelog(),
 	}
 }
 
@@ -102,7 +104,7 @@ func (h *Harness) loopStep(ctx context.Context, messages MessageHistory) error {
 	//system += h.mcp.GetCodeSnippets()
 	// add system message to message history object?
 
-	resp, err := h.llm.Chat(ctx, messages.History(promptChooseAction), availableTools())
+	resp, err := h.llm.Chat(ctx, messages.History(promptChooseAction, FilterAll), availableTools())
 	if err != nil {
 		return fmt.Errorf("LLM call: %w", err)
 	}
@@ -130,21 +132,24 @@ func (h *Harness) loopStep(ctx context.Context, messages MessageHistory) error {
 // No sub-loop needed — the LLM reads the info and picks its next action.
 func (h *Harness) handleGetQueryInfo(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
 	lang, group, name := strArg(call.Args, "language"), strArg(call.Args, "group"), strArg(call.Args, "query_name")
-	h.logger.Infof("Call to get query info: %s.%s.%s", lang, group, name)
+	h.logger.Infof("Harness handling call to get query info: %s.%s.%s", lang, group, name)
 
 	// loop over querygetinfo, if it starts with "Error:" then retry (with error in history)
 	messages.AppendToolResult(tooldef.ToolGetQueryInfo, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolGetQueryInfo)+h.mcp.GetQueryInfo(lang, group, name))
 
 	// once done, we call the after-tool function
-	h.afterTool(ctx, messages)
+	h.afterTool(ctx, messages, call)
 	return nil
 }
 
 // handleRunQuery runs an existing query and pages the results through the LLM.
 func (h *Harness) handleRunQuery(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
-	//lang, group, name := strArg(call.Args, "language"), strArg(call.Args, "group"), strArg(call.Args, "query_name")
-	//results := h.mcp.RunQuery(lang, group, name)
+	lang, group, name := strArg(call.Args, "language"), strArg(call.Args, "group"), strArg(call.Args, "query_name")
+	h.logger.Infof("Harness handling call to run query: %s.%s.%s", lang, group, name)
+	messages.AppendToolResult(tooldef.ToolRunQuery, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolRunQuery)+h.mcp.RunQuery(lang, group, name))
 
+	// once done, we call the after-tool function
+	h.afterTool(ctx, messages, call)
 	return nil
 }
 
@@ -159,9 +164,8 @@ func (h *Harness) handleTestQuery(ctx context.Context, messages *MessageHistory,
 	return nil
 }
 
-func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory) error {
-
-	resp, err := h.llm.Chat(ctx, messages.History(promptNotesOnResults), notepadTool())
+func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory, prevCall llm.ToolCall) error {
+	resp, err := h.llm.Chat(ctx, messages.History(promptNotesOnResults, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false})), notepadTool())
 	if err != nil {
 		return fmt.Errorf("LLM call: %w", err)
 	}
@@ -173,34 +177,57 @@ func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory) error
 
 	call := resp.ToolCalls[0]
 
-	if call.Name == tooldef.ToolEditNotes {
-		return h.handleNotes(ctx, messages, call)
+	if call.Name == tooldef.ToolReview {
+		return h.handleNotes(ctx, messages, call, prevCall)
 	} else {
 		return fmt.Errorf("unknown tool: %s", call.Name)
 	}
-
-	return nil
 }
 
-func (h *Harness) handleNotes(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
-	//summary, notes_add, notes_del, notes_upd := strArg(call.Args, "summary"), strArg(call.Args, "notes_to_create"), strArg(call.Args, "notes_to_delete"), strArg(call.Args, "notes_to_update")
+func (h *Harness) handleNotes(ctx context.Context, messages *MessageHistory, call llm.ToolCall, prevCall llm.ToolCall) error {
+	summary := strArg(call.Args, "summary")
+	prevPurpose := strArg(prevCall.Args, "purpose")
+	prevCallString := prevCall.Name + "(" +
+		strArg(prevCall.Args, "language") + "." +
+		strArg(prevCall.Args, "group") + "." +
+		strArg(prevCall.Args, "query_name") + ")"
+	h.changelog.AddToolCall(prevPurpose, summary, prevCallString)
 
+	if items, ok := call.Args["notes_to_create"].([]any); ok {
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				h.notepad.Create(strArg(m, "type"), strArg(m, "content"))
+			}
+		}
+	}
+
+	if items, ok := call.Args["notes_to_delete"].([]any); ok {
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				h.notepad.Delete(strArg(m, "id"))
+			}
+		}
+	}
+
+	if items, ok := call.Args["notes_to_update"].([]any); ok {
+		for _, item := range items {
+			if m, ok := item.(map[string]any); ok {
+				h.notepad.Update(strArg(m, "id"), strArg(m, "content"))
+			}
+		}
+	}
+
+	messages.AppendToolResult(tooldef.ToolReview, "Notes updated.")
 	return nil
-}
-
-func (h *Harness) getLastQueryInfo() string {
-	return ""
 }
 
 func (h *Harness) getNotes() string {
 	str, _ := json.Marshal(h.notepad.All())
-	return "You have the following notes in your notepad:\n" + string(str)
+	return "These are the notes in your notepad:\n" + string(str)
 }
 
 func (h *Harness) getChangelog() string {
-	changelog := []string{}
-	str, _ := json.Marshal(changelog)
-	return "Changelog:\n" + string(str)
+	return "This is the immutable changelog listing actions executed thus far:\n" + h.changelog.GetChangelog()
 }
 
 func (h *Harness) TestsPassed() bool {

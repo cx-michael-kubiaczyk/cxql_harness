@@ -17,11 +17,24 @@ func NewHistory() MessageHistory {
 	}
 }
 
-func (h *MessageHistory) History(prompt string) []llm.Message {
-	return append(
-		[]llm.Message{h.system, h.changelog, h.notes},
-		append(h.messages, llm.Message{Role: llm.RoleUser, Content: prompt})...,
-	)
+func (h *MessageHistory) History(prompt string, opts HistoryFilter) []llm.Message {
+	var messages []llm.Message
+
+	if opts.System {
+		messages = append(messages, h.system)
+	}
+	if opts.Changelog {
+		messages = append(messages, h.changelog)
+	}
+	if opts.Notes {
+		messages = append(messages, h.notes)
+	}
+	if opts.Messages {
+		messages = append(messages, h.messages...)
+	}
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: prompt})
+
+	return messages
 }
 
 func (h *MessageHistory) SetSystem(system string) {
