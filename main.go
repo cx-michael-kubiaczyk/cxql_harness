@@ -81,6 +81,17 @@ func main() {
 
 		h = harness.New(logger, mcp.NewMCP(cx1client, logger), llmClient, *maxIter)
 	} else {
+		/*
+			Test does:
+				- GetQueryInfo call
+				- Add a note
+				- Run Query
+				- Add a note, delete a note
+				- Run broken custom query
+				todo:
+				- Debug?
+				- Add a note?
+		*/
 		h = harness.New(logger, harness.NewTestMCP(), llm.NewTestLLM(logger), *maxIter)
 	}
 

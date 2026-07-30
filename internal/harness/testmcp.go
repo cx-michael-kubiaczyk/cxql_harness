@@ -114,7 +114,7 @@ func (m *TestMCP) CheckOriginalFinding() string {
 
 // runs an existing query and returns the results (which may be multiple dataflow paths)
 func (m *TestMCP) RunQuery(language, group, query string) string {
-	return ""
+	return "There were no results returned."
 }
 
 // runs an updated version of a CxQL query, without saving the changes, and returns the results (which may be multiple dataflow paths)
@@ -123,6 +123,6 @@ func (m *TestMCP) TestQuery(language, group, query, code string) string {
 }
 
 // saves an updated version of a CxQL query based on the last successful RunQuery call.
-func (m *TestMCP) SaveQuery(language, group, query string) string {
+func (m *TestMCP) SaveQuery(language, group, query, code string) string {
 	return ""
 }

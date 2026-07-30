@@ -37,5 +37,5 @@ type mcpi interface {
 	TestQuery(language, group, query, code string) string
 
 	// saves an updated version of a CxQL query based on the last successful RunQuery call.
-	SaveQuery(language, group, query string) string
+	SaveQuery(language, group, query, code string) string
 }

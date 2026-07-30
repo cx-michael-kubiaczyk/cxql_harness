@@ -156,11 +156,12 @@ func (h *Harness) handleRunQuery(ctx context.Context, messages *MessageHistory, 
 // handleTestQuery tests a modified query. On compile success it auto-saves and
 // checks whether the original finding is still present.
 func (h *Harness) handleTestQuery(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
-	//lang, group, name, code := strArg(call.Args, "language"), strArg(call.Args, "group"), strArg(call.Args, "query_name"), strArg(call.Args, "code")
+	lang, group, name, code := strArg(call.Args, "language"), strArg(call.Args, "group"), strArg(call.Args, "query_name"), strArg(call.Args, "code")
+	h.logger.Infof("Harness handling call to run query: %s.%s.%s", lang, group, name)
+	messages.AppendToolResult(tooldef.ToolTestQuery, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolTestQuery)+h.mcp.TestQuery(lang, group, name, code))
 
-	//results := h.mcp.TestQuery(lang, group, name, code)
-	// Finding persists — show the status so the LLM can continue reasoning.
-	//h.appendUser(fmt.Sprintf("Finding still present after save: %s\nContinue exploring.", findingStatus))
+	// once done, we call the after-tool function
+	h.afterTool(ctx, messages, call)
 	return nil
 }
 

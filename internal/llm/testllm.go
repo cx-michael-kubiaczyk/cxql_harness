@@ -66,6 +66,29 @@ func NewTestLLM(logger *logrus.Logger) LLM {
 					},
 				},
 			}},
+			{ToolCalls: []ToolCall{
+				{
+					ID:   "call-test-query",
+					Name: tooldef.ToolTestQuery,
+					Args: map[string]any{
+						"purpose":    "Test updated version of dependent query Find_HSTS_Sanitize.",
+						"language":   "JavaScript",
+						"group":      "General",
+						"query_name": "Find_HSTS_Sanitize",
+						"code":       "result = base.Find_();",
+					},
+				},
+			}},
+			{ToolCalls: []ToolCall{
+				{
+					ID:   "update-notes",
+					Name: tooldef.ToolReview,
+					Args: map[string]any{
+						"summary":         "Woops",
+						"notes_to_create": []any{map[string]any{"type": "Finding", "content": "I am bad at cxql."}},
+					},
+				},
+			}},
 		},
 	}
 }
