@@ -46,6 +46,11 @@ func (h *MessageHistory) SetChangelog(changelog string) {
 func (h *MessageHistory) SetNotes(notes string) {
 	h.notes.Content = notes
 }
+func (h *MessageHistory) CloneHistory() MessageHistory {
+	return MessageHistory{
+		messages: h.messages,
+	}
+}
 
 func (h *MessageHistory) AppendAssistant(resp llm.Response) {
 	h.messages = append(h.messages, llm.Message{

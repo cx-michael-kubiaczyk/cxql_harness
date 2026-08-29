@@ -1,6 +1,11 @@
 package harness
 
-type TestMCP struct{}
+import "fmt"
+
+type TestMCP struct {
+	runReqCount  int
+	testReqCount int
+}
 
 func NewTestMCP() mcpi {
 	return &TestMCP{}
@@ -87,24 +92,23 @@ func (m *TestMCP) ShowSourceCode(path string, lineStart, lineEnd int) string {
 }
 
 // returns the CxQL hierarchy + source code for a given query, eg: Missing_HSTS_Header
-func (m *TestMCP) GetQueryInfo(language, group, name string) string {
+func (m *TestMCP) GetQueryInfoFiltered(language, group, name string, view, edit []bool) string {
 	return `[QUERY INFO]
 The query JavaScript - JavaScript_Medium_Threat - Missing_HSTS_Header is included in the product
 
 [PRODUCT DEFAULT QUERY INFO]
-Can edit: false
 Source code: 
 ` + "```" + `csharp
 result = Common_Medium_Threat.Missing_HSTS_Header().SanitizeCxList(Find_HSTS_Sanitize());
 ` + "```" + `
-The following queries are called by this query and can be edited or overridden:
+The following queries are called by this query:
  - JavaScript.General.Find_HSTS_Sanitize
 
-[TENANT CUSTOM QUERY INFO]
-Can create: true
+[TENANT-LEVEL QUERY INFO]
+Doesn't exist, cannot create (out of scope)
 
-[PROJECT CUSTOM QUERY INFO]
-Can create: true`
+[APPLICATION-LEVEL QUERY INFO]
+Can create`
 }
 
 // checks if the original finding is found in the audit session or not
@@ -114,12 +118,27 @@ func (m *TestMCP) CheckOriginalFinding() string {
 
 // runs an existing query and returns the results (which may be multiple dataflow paths)
 func (m *TestMCP) RunQuery(language, group, query string) string {
-	return "There were no results returned."
+	m.runReqCount++
+	switch m.runReqCount {
+	case 1:
+		return "There were no results returned."
+	default:
+		return fmt.Sprintf("RunQuery %d: huh", m.runReqCount)
+	}
 }
 
 // runs an updated version of a CxQL query, without saving the changes, and returns the results (which may be multiple dataflow paths)
 func (m *TestMCP) TestQuery(language, group, query, code string) string {
-	return ""
+	m.testReqCount++
+	switch m.testReqCount {
+	case 1:
+		return `Error: The query JavaScript.General.Find_HSTS_Sanitize ran with errors, shown inline in the code below.
+result = base.Find_(); // audit: Error: 'DynamicQuery_Runner.JavaScript.Corp.General' does not contain a definition for 'Find_'`
+	case 2:
+		return "There were no results returned."
+	default:
+		return fmt.Sprintf("RunQuery request %d undefined", m.testReqCount)
+	}
 }
 
 // saves an updated version of a CxQL query based on the last successful RunQuery call.

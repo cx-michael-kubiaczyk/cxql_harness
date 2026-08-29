@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -23,7 +24,11 @@ func main() {
 	myformatter.TimestampFormat = "2006-01-02 15:04:05.000"
 	myformatter.LogFormat = "[%lvl%][%time%] %msg%\n"
 	logger.SetFormatter(myformatter)
-	logger.SetOutput(os.Stdout)
+
+	f, _ := os.Create("log.txt")
+	defer f.Close()
+	outwriter := io.MultiWriter(os.Stdout, f)
+	logger.SetOutput(outwriter)
 
 	backend := flag.String("backend", "ollama", "LLM backend: ollama, openai, anthropic")
 	model := flag.String("model", "", "Model name (default depends on backend)")
@@ -79,20 +84,9 @@ func main() {
 			log.Fatalf("failed to create LLM client: %v", err)
 		}
 
-		h = harness.New(logger, mcp.NewMCP(cx1client, logger), llmClient, *maxIter)
+		h = harness.New(logger, mcp.NewMCP(cx1client, logger), llmClient, *maxIter, true)
 	} else {
-		/*
-			Test does:
-				- GetQueryInfo call
-				- Add a note
-				- Run Query
-				- Add a note, delete a note
-				- Run broken custom query
-				todo:
-				- Debug?
-				- Add a note?
-		*/
-		h = harness.New(logger, harness.NewTestMCP(), llm.NewTestLLM(logger), *maxIter)
+		h = harness.New(logger, harness.NewTestMCP(), llm.NewTestLLM(logger), *maxIter, true)
 	}
 
 	err = h.Run(context.Background(), *findingURL, *prompt)

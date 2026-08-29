@@ -25,7 +25,7 @@ type mcpi interface {
 	ShowSourceCode(path string, lineStart, lineEnd int) string
 
 	// returns the CxQL hierarchy + source code for a given query, eg: Missing_HSTS_Header
-	GetQueryInfo(language, group, name string) string
+	GetQueryInfoFiltered(language, group, name string, view, edit []bool) string
 
 	// checks if the original finding is found in the audit session or not
 	CheckOriginalFinding() string

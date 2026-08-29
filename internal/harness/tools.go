@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"strings"
+
 	"github.com/cxpsemea/cxql-harness/internal/llm"
 	"github.com/cxpsemea/cxql-harness/internal/tooldef"
 )
@@ -60,10 +62,8 @@ func availableTools() []llm.ToolDef {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"purpose":    map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Information Gathering"},
-					"language":   map[string]any{"type": "string", "description": "Programming language, e.g. Java, CSharp"},
-					"group":      map[string]any{"type": "string", "description": "Query group/category, e.g. CxDefaultQueryJava"},
-					"query_name": map[string]any{"type": "string", "description": "Query name, e.g. Reflected_XSS"},
+					"purpose": map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Information Gathering"},
+					"query":   map[string]any{"type": "string", "description": "The query in the format Language.Group.QueryName"},
 				},
 				"required": []string{"purpose", "language", "group", "query_name"},
 			},
@@ -74,28 +74,47 @@ func availableTools() []llm.ToolDef {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"purpose":    map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Information Gathering"},
-					"language":   map[string]any{"type": "string"},
-					"group":      map[string]any{"type": "string"},
-					"query_name": map[string]any{"type": "string"},
+					"purpose": map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Information Gathering"},
+					"query":   map[string]any{"type": "string", "description": "The query in the format Language.Group.QueryName"},
 				},
 				"required": []string{"purpose", "language", "group", "query_name"},
 			},
 		},
 		{
-			Name:        tooldef.ToolTestQuery,
-			Description: "Test a modified version of a CxQL query. On compile error the error is returned so you can fix it.",
+			Name:        tooldef.ToolUpdateQuery,
+			Description: "Update the code for a query.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"purpose":    map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Test behavior when matching additional input XYZ"},
-					"language":   map[string]any{"type": "string"},
-					"group":      map[string]any{"type": "string"},
-					"query_name": map[string]any{"type": "string"},
-					"code":       map[string]any{"type": "string", "description": "Complete CxQL source code for the query"},
+					"purpose": map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Test behavior when matching additional input XYZ"},
+					"query":   map[string]any{"type": "string", "description": "The query in the format Language.Group.QueryName"},
+					"code":    map[string]any{"type": "string", "description": "Complete CxQL source code for the query"},
+				},
+				"required": []string{"purpose", "language", "group", "query_name", "code"},
+			},
+		},
+		{
+			Name:        tooldef.ToolSandbox,
+			Description: "Test CxQL code without changing existing queries.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"purpose":  map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Test behavior when matching additional input XYZ"},
+					"language": map[string]any{"type": "string", "description": "The language for the query as provided by other tool calls, the first part of the query when written in the format Language.Group.QueryName"},
+					"code":     map[string]any{"type": "string", "description": "Complete CxQL source code for the query"},
 				},
 				"required": []string{"purpose", "language", "group", "query_name", "code"},
 			},
 		},
 	}
+}
+
+func getToolDef(name string) []llm.ToolDef {
+	tools := availableTools()
+	for _, t := range tools {
+		if strings.EqualFold(t.Name, name) {
+			return []llm.ToolDef{t}
+		}
+	}
+	return nil
 }

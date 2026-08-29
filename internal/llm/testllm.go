@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -23,13 +22,11 @@ func NewTestLLM(logger *logrus.Logger) LLM {
 		responses: []Response{
 			{ToolCalls: []ToolCall{
 				{
-					ID:   "call-query-info-xss",
+					ID:   "call-query-info-hsts",
 					Name: tooldef.ToolGetQueryInfo,
 					Args: map[string]any{
-						"purpose":    "Gather information on the query generating the false-positive.",
-						"language":   "JavaScript",
-						"group":      "JavaScript_Medium_Threat",
-						"query_name": "Missing_HSTS_Header",
+						"purpose": "Gather information on the query generating the false-positive.",
+						"query":   "JavaScript.JavaScript_Medium_Threat.Missing_HSTS_Header",
 					},
 				},
 			}},
@@ -48,10 +45,8 @@ func NewTestLLM(logger *logrus.Logger) LLM {
 					ID:   "call-run-query",
 					Name: tooldef.ToolRunQuery,
 					Args: map[string]any{
-						"purpose":    "Observe the output of the dependent query Find_HSTS_Sanitize.",
-						"language":   "JavaScript",
-						"group":      "General",
-						"query_name": "Find_HSTS_Sanitize",
+						"purpose": "Observe the output of the dependent query Find_HSTS_Sanitize.",
+						"query":   "JavaScript.JavaScript_Medium_Threat.Missing_HSTS_Header",
 					},
 				},
 			}},
@@ -69,13 +64,22 @@ func NewTestLLM(logger *logrus.Logger) LLM {
 			{ToolCalls: []ToolCall{
 				{
 					ID:   "call-test-query",
-					Name: tooldef.ToolTestQuery,
+					Name: tooldef.ToolUpdateQuery,
 					Args: map[string]any{
-						"purpose":    "Test updated version of dependent query Find_HSTS_Sanitize.",
-						"language":   "JavaScript",
-						"group":      "General",
-						"query_name": "Find_HSTS_Sanitize",
-						"code":       "result = base.Find_();",
+						"purpose": "Test broken version of dependent query Find_HSTS_Sanitize.",
+						"query":   "JavaScript.JavaScript_Medium_Threat.Missing_HSTS_Header",
+						"code":    "result = base.Find_();",
+					},
+				},
+			}},
+			{ToolCalls: []ToolCall{
+				{
+					ID:   "call-test-query",
+					Name: tooldef.ToolUpdateQuery,
+					Args: map[string]any{
+						"purpose": "Test fixed version of dependent query Find_HSTS_Sanitize.",
+						"query":   "JavaScript.JavaScript_Medium_Threat.Missing_HSTS_Header",
+						"code":    "result = base.Find_HSTS_Sanitize();",
 					},
 				},
 			}},
@@ -95,26 +99,12 @@ func NewTestLLM(logger *logrus.Logger) LLM {
 
 func (c *testLLM) Chat(ctx context.Context, messages []Message, tools []ToolDef) (Response, error) {
 	str := strings.Builder{}
-	for _, msg := range messages {
-		min := 50
-		max := 100
-		if min > len(msg.Content) || max > len(msg.Content) || min+max > len(msg.Content) {
-			fmt.Fprintf(&str, "%s: %s\n", msg.Role, msg.Content)
-		} else {
-			fmt.Fprintf(&str, "%s: %s..\n..%s\n", msg.Role, msg.Content[:min], msg.Content[len(msg.Content)-max:])
-		}
-	}
-	c.logger.Info("LLM Receives messages:\n", str.String())
-
-	str.Reset()
 	for _, tool := range tools {
 		str.WriteString(fmt.Sprintf("%s: %s\n", tool.Name, tool.Description))
 	}
 	c.logger.Info("Tools:\n", str.String())
 
 	response := c.nextResponse()
-	msg, _ := json.MarshalIndent(response, "", "  ")
-	c.logger.Info("LLM Responds:\n", string(msg))
 	return response, nil
 }
 
