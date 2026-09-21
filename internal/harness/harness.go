@@ -85,7 +85,6 @@ The CxSAST product includes a variety of queries covering a range of security vu
 Queries that represent security vulnerabilities can call other queries to assemble the dataflows from the 'source node' to the 'sink node' in the AST.
 Most queries can be 'overridden' allowing users to change the behavior of a specific query.
 Query execution can also be chained, so a Tenant-wide override of Reflected_XSS can call the product default version via: result = base.Reflected_XSS();
-An override of a query can call the original base query via base.Query_Name().
 When addressing false-positive results in a finding, the process follows these steps:
 1. Examine the source code involved in the dataflow for the false-positive result.
 2. Examine the target query generating the false-positive result to see the query source code and any dependencies on other queries.
@@ -94,6 +93,8 @@ When addressing false-positive results in a finding, the process follows these s
 5. Create new application-level overrides, or update existing application-level overrides.
 6. Test the updated queries to evaluate the result.
 7. Repeat the process as needed until the false positive is removed.
+
+This process enforces only application-level query changes for compliance reasons.
 `,
 	)
 	messages.SetSystem(system)

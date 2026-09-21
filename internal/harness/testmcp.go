@@ -36,6 +36,17 @@ When addressing false-positive results in a finding, the process follows these s
 7. Repeat the process as needed until the false positive is removed.`
 }
 
+func (m *TestMCP) GetCurrentProjectID() string {
+	return "123"
+}
+func (m *TestMCP) GetCurrentApplicationID() string {
+	return "321"
+}
+
+func (m *TestMCP) ConfigureCustomPreset(presetName string) string {
+	return "Created custom preset with query xxx"
+}
+
 // return the explanation of the finding eg: Missing_HSTS description + recommendation
 func (m *TestMCP) GetFindingDetails() string {
 	return `Finding javascript.JavaScript_Medium_Threat.Missing_HSTS_Header details:
@@ -114,6 +125,10 @@ Can create`
 // checks if the original finding is found in the audit session or not
 func (m *TestMCP) CheckOriginalFinding() string {
 	return "The finding is present."
+}
+
+func (m *TestMCP) CheckControlProjects() string {
+	return "No regressions"
 }
 
 // runs an existing query and returns the results (which may be multiple dataflow paths)

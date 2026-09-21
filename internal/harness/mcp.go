@@ -9,6 +9,13 @@ type mcpi interface {
 	//   - the CxQL query that was used to find the issue
 	GetCurrentState() string
 
+	// Get the current Project and Application
+	GetCurrentProjectID() string
+	GetCurrentApplicationID() string
+
+	// Prepare a preset with only the current finding included
+	ConfigureCustomPreset(presetName string) string
+
 	// return the explanation of the finding eg: Missing_HSTS description + recommendation
 	GetFindingDetails() string
 
@@ -29,6 +36,9 @@ type mcpi interface {
 
 	// checks if the original finding is found in the audit session or not
 	CheckOriginalFinding() string
+
+	// rescans the other projects in the application to verify if the findings remain
+	CheckControlProjects() string
 
 	// runs an existing query and returns the results (which may be multiple dataflow paths)
 	RunQuery(language, group, query string) string
