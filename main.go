@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -33,8 +34,8 @@ func main() {
 	backend := flag.String("backend", "ollama", "LLM backend: ollama, openai, anthropic")
 	model := flag.String("model", "", "Model name (default depends on backend)")
 	maxIter := flag.Int("max-iter", 20, "Maximum reasoning iterations")
-	findingURL := flag.String("link", "", "Link to the finding to be addressed as a False Positive")
 	prompt := flag.String("prompt", "", "Optional: Guidance to the LLM regarding the problem and/or desired solution")
+	config := flag.String("config", "conf.json", "Configuration file containing target FP, TPList, and TNList - see example-conf.json")
 
 	var cx1client *Cx1ClientGo.Cx1Client
 	httpClient := &http.Client{}
@@ -46,8 +47,8 @@ func main() {
 	test := fs.Bool("test", false, "Test mode")
 	_ = fs.Parse(os.Args[1:])
 	if !*test {
-		if *findingURL == "" {
-			fmt.Fprintf(os.Stderr, "A finding URL is required")
+		if *config == "" {
+			fmt.Fprintf(os.Stderr, "A configuration file is required")
 			flag.PrintDefaults()
 			os.Exit(1)
 		}
@@ -89,7 +90,23 @@ func main() {
 		h = harness.New(logger, harness.NewTestMCP(), llm.NewTestLLM(logger), *maxIter, true)
 	}
 
-	err = h.Run(context.Background(), *findingURL, *prompt)
+	var conf struct {
+		FindingURL string
+		TPList     []string
+		TNList     []string
+	}
+
+	data, err := os.ReadFile(*config)
+	if err != nil {
+		log.Fatalf("Failed to read config file %s: %s", *config, err)
+	}
+
+	err = json.Unmarshal(data, &conf)
+	if err != nil {
+		log.Fatalf("Failed to parse config file %s: %s", *config, err)
+	}
+
+	err = h.Run(context.Background(), conf.FindingURL, *prompt, conf.TPList, conf.TNList)
 	if err != nil {
 		log.Fatalf("harness error: %v", err)
 	}

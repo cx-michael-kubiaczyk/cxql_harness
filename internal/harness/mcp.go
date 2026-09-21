@@ -1,7 +1,7 @@
 package harness
 
 type mcpi interface {
-	CreateSessionFromURL(path string) string
+	CreateSessionFromURL(path string, tpFindings, tnFindings []string) string
 
 	// returns the current state:
 	//   - current finding details (description, recommendation),

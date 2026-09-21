@@ -38,15 +38,15 @@ func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int, 
 
 // Run initialises a session for the given finding URL and drives the reasoning
 // loop until the finding is resolved or maxIter is reached.
-func (h *Harness) Run(ctx context.Context, findingURL, userPrompt string) error {
-	if err := h.initSession(ctx, findingURL); err != nil {
+func (h *Harness) Run(ctx context.Context, findingURL, userPrompt string, TPList, TNList []string) error {
+	if err := h.initSession(ctx, findingURL, TPList, TNList); err != nil {
 		return fmt.Errorf("init session: %s", err)
 	}
 	return h.runLoop(ctx)
 }
 
-func (h *Harness) initSession(_ context.Context, findingURL string) error {
-	if response := strings.TrimSpace(h.mcp.CreateSessionFromURL(findingURL)); response != "The session was created successfully and the finding is present." {
+func (h *Harness) initSession(_ context.Context, findingURL string, TPList, TNList []string) error {
+	if response := strings.TrimSpace(h.mcp.CreateSessionFromURL(findingURL, TPList, TNList)); response != "The session was created successfully and the finding is present." {
 		return fmt.Errorf("CreateSessionFromURL: %s", response)
 	}
 	return nil

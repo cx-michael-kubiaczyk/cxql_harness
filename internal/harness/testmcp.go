@@ -11,11 +11,14 @@ func NewTestMCP() mcpi {
 	return &TestMCP{}
 }
 
-func (m *TestMCP) CreateSessionFromURL(path string) string {
+func (m *TestMCP) CreateSessionFromURL(path string, TPList, TNList []string) string {
 	return "The session was created successfully and the finding is present."
 }
 func (m *TestMCP) GetCurrentState() string {
 	return ""
+}
+func (m *TestMCP) GetCurrentApplicationID() string {
+	return "123"
 }
 
 func (m *TestMCP) GetHLD() string {
@@ -38,9 +41,6 @@ When addressing false-positive results in a finding, the process follows these s
 
 func (m *TestMCP) GetCurrentProjectID() string {
 	return "123"
-}
-func (m *TestMCP) GetCurrentApplicationID() string {
-	return "321"
 }
 
 func (m *TestMCP) ConfigureCustomPreset(presetName string) string {
