@@ -14,7 +14,7 @@ type mcpi interface {
 	GetCurrentApplicationID() string
 
 	// Prepare a preset with only the current finding included
-	ConfigureCustomPreset(presetName string) string
+	//ConfigureCustomPreset(presetName string) string
 
 	// return the explanation of the finding eg: Missing_HSTS description + recommendation
 	GetFindingDetails() string
