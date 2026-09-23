@@ -278,13 +278,14 @@ func (h *Harness) handleUpdateQuery(ctx context.Context, messages *MessageHistor
 	control := h.mcp.CheckControlProjects()
 	if strings.HasPrefix(control, "Regression:") {
 		h.logger.Debugf("Control check failure after updating app-level query %s.%s.%s with code:\n%s\n\n---------\n%s", lang, group, name, code, control)
-		if original_code != "Query doesn't exist" {
+		messages.AppendToolResult("check_control_projects", "Running the true-positive and true-negative control projects with this query change resulted in: "+control)
+		/*if original_code != "Query doesn't exist" {
 			original_code = strings.TrimSuffix(strings.TrimPrefix(original_code, "```csharp\n"), "\n```\n")
 			save := h.mcp.SaveQuery(QUERY_LEVEL_APPLICATION, lang, group, name, original_code)
 			if strings.HasPrefix(save, "Error:") {
 				return fmt.Errorf("Failed to revert query: %s", save)
 			}
-		}
+		}*/
 	}
 
 	// once done, we call the after-tool function
