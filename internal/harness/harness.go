@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -90,18 +91,18 @@ func (h *Harness) runLoop(ctx context.Context) error {
 Each query returns a list of items representing nodes or dataflow paths through the AST.
 The CxSAST product includes a variety of queries covering a range of security vulnerabilities, such as Reflected XSS or SQL Injection.
 Queries that represent security vulnerabilities can call other queries to assemble the dataflows from the 'source node' to the 'sink node' in the AST.
-Most queries can be 'overridden' allowing users to change the behavior of a specific query.
-Query execution can also be chained, so a Tenant-wide override of Reflected_XSS can call the product default version via: result = base.Reflected_XSS();
+Queries exist at four levels, from least to most specific: Product (built-in) -> Tenant -> Application -> Project. Most queries can be 'overridden' at the Tenant, Application, or Project level to change their behavior.
+Query execution can be chained across levels, so an Application-level override of Reflected_XSS can call the next level up via: result = base.Reflected_XSS();
 When addressing false-positive results in a finding, the process follows these steps:
 1. Examine the source code involved in the dataflow for the false-positive result.
 2. Examine the target query generating the false-positive result to see the query source code and any dependencies on other queries.
-3. Examine any other queries and their overrides if they are part of the target query's call chains.
+3. Examine any other queries and their overrides if they are part of the target query's call chains. You may run and inspect Product-level and Tenant-level queries to understand their behavior, but you must never create, edit, or save Tenant-level overrides.
 4. Run any queries involved in the target query's call chain to identify points of improvement.
-5. Create new application-level overrides, or update existing application-level overrides.
+5. Create new Application-level overrides, or update existing Application-level overrides, to address the false positive.
 6. Test the updated queries to evaluate the result.
 7. Repeat the process as needed until the false positive is removed.
 
-This process enforces only application-level query changes for compliance reasons.
+Query changes are restricted to the Application level for compliance reasons: you must never create, edit, or save Project-level query overrides, and Product-level queries cannot be modified at all.
 `,
 	)
 	messages.SetSystem(system)
@@ -109,11 +110,15 @@ This process enforces only application-level query changes for compliance reason
 	for i := 0; i < h.maxIter; i++ {
 		messages.SetChangelog(h.getChangelog())
 		messages.SetNotes(h.getNotes())
-		err := h.loopStep(ctx, messages)
+		err := h.loopStep(ctx, &messages)
 		if err != nil {
 			return fmt.Errorf("failed step: %s", err)
 		}
-		if h.TestsPassed() {
+		passed, err := h.TestsPassed()
+		if err != nil {
+			return fmt.Errorf("check tests passed: %w", err)
+		}
+		if passed {
 			return nil
 		}
 	}
@@ -124,12 +129,11 @@ This process enforces only application-level query changes for compliance reason
 // each iteration will be a tool call until the process finishes
 // the tool calls can be: get query info, run query, and test query
 // the tool call updates the back-end state
-func (h *Harness) loopStep(ctx context.Context, messages MessageHistory) error {
-	//system += h.getLastQueryInfo() + "\n"
-	//system += h.mcp.GetCodeSnippets()
-	// add system message to message history object?
-
-	resp, err := h.chat(ctx, messages.History(promptChooseAction, FilterAll), availableTools())
+func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error {
+	// The LLM only sees the changelog + notepad summaries here, not the raw
+	// tool traffic from earlier cycles — that scratch buffer is local to a
+	// single cycle and is cleared in handleNotes once it's been summarized.
+	resp, err := h.chat(ctx, messages.History(promptChooseAction, FilterAll.Except(HistoryFilter{Messages: true})), availableTools())
 	if err != nil {
 		return fmt.Errorf("LLM call: %w", err)
 	}
@@ -138,19 +142,19 @@ func (h *Harness) loopStep(ctx context.Context, messages MessageHistory) error {
 		// LLM produced a plain text response — it may be an error
 		return fmt.Errorf("No tool call generated, response was: %s", resp.Content)
 	}
+	messages.AppendAssistant(resp)
 
 	call := resp.ToolCalls[0]
 	switch call.Name {
 	case tooldef.ToolGetQueryInfo:
-		return h.handleGetQueryInfo(ctx, &messages, call)
+		return h.handleGetQueryInfo(ctx, messages, call)
 	case tooldef.ToolRunQuery:
-		return h.handleRunQuery(ctx, &messages, call)
+		return h.handleRunQuery(ctx, messages, call)
 	case tooldef.ToolUpdateQuery:
-		return h.handleUpdateQuery(ctx, &messages, call)
+		return h.handleUpdateQuery(ctx, messages, call)
 	case tooldef.ToolSandbox:
-		return h.handleSandboxQuery(ctx, &messages, call)
+		return h.handleSandboxQuery(ctx, messages, call)
 	default:
-		//messages.AppendToolResult(call.ID, fmt.Sprintf("unknown tool: %s", call.Name))
 		return fmt.Errorf("unknown tool: %s", call.Name)
 	}
 }
@@ -166,7 +170,7 @@ func (h *Harness) handleGetQueryInfo(ctx context.Context, messages *MessageHisto
 
 	// loop over querygetinfo, if it starts with "Error:" then retry (with error in history)
 	toolResult := h.mcp.GetQueryInfoFiltered(lang, group, name, []bool{true, true, true, false}, []bool{false, false, true, false})
-	messages.AppendToolResult(tooldef.ToolGetQueryInfo, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolGetQueryInfo)+toolResult)
+	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolGetQueryInfo)+toolResult)
 
 	// once done, we call the after-tool function
 	h.afterTool(ctx, messages, call)
@@ -183,7 +187,7 @@ func (h *Harness) handleRunQuery(ctx context.Context, messages *MessageHistory, 
 
 	h.logger.Infof("Harness handling call to run query: %s.%s.%s", lang, group, name)
 	toolResult := h.mcp.RunQuery(level, lang, group, name)
-	messages.AppendToolResult(tooldef.ToolRunQuery, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolRunQuery)+toolResult)
+	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolRunQuery)+toolResult)
 
 	// once done, we call the after-tool function
 	h.afterTool(ctx, messages, call)
@@ -202,14 +206,17 @@ func (h *Harness) handleSandboxQuery(ctx context.Context, messages *MessageHisto
 	toolResult := h.mcp.TestQuery(QUERY_LEVEL_APPLICATION, lang, group, name, code)
 	if strings.HasPrefix(toolResult, "Error:") {
 		h.logger.Errorf("Failure running query:\n%s", toolResult)
+		// handleQueryError identifies the query being fixed via call.Args["query"];
+		// the sandbox tool has no such field, so synthesize one from its fixed group/name.
+		call.Args["query"] = lang + "." + group + "." + name
 		last_call, result, err := h.handleQueryError(ctx, messages, call, toolResult)
 		if err != nil {
-			return nil
+			return err
 		}
 		toolResult = result
 		call = last_call
 	}
-	messages.AppendToolResult(tooldef.ToolUpdateQuery, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolUpdateQuery)+toolResult)
+	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolSandbox)+toolResult)
 
 	// once done, we call the after-tool function
 	h.afterTool(ctx, messages, call)
@@ -241,7 +248,7 @@ func (h *Harness) handleUpdateQuery(ctx context.Context, messages *MessageHistor
 		toolResult = result
 		call = last_call
 	}
-	messages.AppendToolResult(tooldef.ToolUpdateQuery, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolUpdateQuery)+toolResult)
+	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolUpdateQuery)+toolResult)
 
 	code = strArg(call.Args, "code") // may have changed during error-handling
 	save := h.mcp.SaveQuery(QUERY_LEVEL_APPLICATION, lang, group, name, code)
@@ -251,7 +258,7 @@ func (h *Harness) handleUpdateQuery(ctx context.Context, messages *MessageHistor
 
 	// check control projects
 	control := h.mcp.CheckControlProjects()
-	if strings.HasPrefix(control, "Error:") {
+	if strings.HasPrefix(control, "Regression:") {
 		h.logger.Debugf("Control check failure after updating app-level query %s.%s.%s with code:\n%s\n\n---------\n%s", lang, group, name, code, control)
 		if original_code != "Query doesn't exist" {
 			original_code = strings.TrimSuffix(strings.TrimPrefix(original_code, "```csharp\n"), "\n```\n")
@@ -271,14 +278,14 @@ func (h *Harness) handleQueryError(ctx context.Context, messages *MessageHistory
 	var hist MessageHistory
 	var resp llm.Response
 	query := strArg(call.Args, "query")
-	lang, group, name, err := queryFromStr(strArg(call.Args, "query"))
+	lang, group, name, err := queryFromStr(query)
 	if err != nil {
 		return call, toolResult, err
 	}
 
 	lastToolDef := getToolDef(call.Name)
 	if len(lastToolDef) == 0 {
-		err = fmt.Errorf("expected a tool named %s but found none", call.Name)
+		return call, toolResult, fmt.Errorf("expected a tool named %s but found none", call.Name)
 	}
 
 	code := strArg(call.Args, "code")
@@ -291,19 +298,19 @@ func (h *Harness) handleQueryError(ctx context.Context, messages *MessageHistory
 		} else {
 			hist.SetSystem("Update the code to address any errors.")
 		}
-		messages.AppendToolResult(call.Name, fmt.Sprintf(`The call to %s returned the following:
+		hist.AppendToolResult(call.Name, fmt.Sprintf(`The call to %s returned the following:
 `+"```"+`
 %s
 `+"```"+`
 
-The source code for %s is: 
+The source code for %s is:
 `+"```"+`
 %s
 `+"```"+`
 `, call.Name, toolResult, query, code))
 
 		err = h.withRetries("Generate fixed query "+query, 3, func() error {
-			resp, err = h.chat(ctx, messages.History(promptDebugQuery, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false})), lastToolDef)
+			resp, err = h.chat(ctx, hist.History(promptDebugQuery, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false})), lastToolDef)
 			if err != nil {
 				return fmt.Errorf("LLM call: %w", err)
 			}
@@ -323,16 +330,22 @@ The source code for %s is:
 		if err != nil {
 			return err
 		}
+		//messages.AppendAssistant(resp)
 
 		last_call.Args["purpose"] = strArg(call.Args, "purpose")
+		// last_call carries the LLM's fixed code — test that, not the code that
+		// just failed, and carry it forward so the next retry (if any) reports
+		// on this attempt rather than re-describing the original failure.
+		code = strArg(last_call.Args, "code")
+		call = last_call
+
 		h.logger.Infof("Harness handling call to run query: %s.%s.%s", lang, group, name)
 		last_result = h.mcp.TestQuery(QUERY_LEVEL_APPLICATION, lang, group, name, code)
 		if strings.HasPrefix(last_result, "Error:") {
 			toolResult = last_result
 			return fmt.Errorf("Query has error")
-		} else {
-			return nil
 		}
+		return nil
 	})
 
 	return
@@ -388,7 +401,9 @@ func (h *Harness) handleNotes(ctx context.Context, messages *MessageHistory, cal
 		}
 	}
 
-	messages.AppendToolResult(tooldef.ToolReview, "Notes updated.")
+	// The cycle is now fully captured in the changelog + notepad; drop the raw
+	// tool traffic so the next cycle's "choose action" turn starts clean.
+	messages.ClearMessages()
 	return nil
 }
 
@@ -401,8 +416,23 @@ func (h *Harness) getChangelog() string {
 	return "This is the immutable changelog listing actions executed thus far:\n" + h.changelog.GetChangelog()
 }
 
-func (h *Harness) TestsPassed() bool {
-	return false
+func (h *Harness) TestsPassed() (bool, error) {
+	control := h.mcp.CheckControlProjects()
+	if strings.HasPrefix(control, "Error:") {
+		return false, errors.New(control)
+	}
+	if strings.HasPrefix(control, "Regression:") {
+		return false, nil
+	}
+
+	status := h.mcp.CheckOriginalFinding()
+	if strings.HasPrefix(status, "Error:") {
+		return false, errors.New(status)
+	}
+	if status == "Finding is present" { // expecting to remove the FP
+		return false, nil
+	}
+	return true, nil
 }
 
 func strArg(args map[string]any, key string) string {

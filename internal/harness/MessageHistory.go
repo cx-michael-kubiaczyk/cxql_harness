@@ -52,6 +52,12 @@ func (h *MessageHistory) CloneHistory() MessageHistory {
 	}
 }
 
+// ClearMessages drops the raw tool-call scratch accumulated during a cycle.
+// Call this once a cycle's outcome has been folded into the changelog/notepad.
+func (h *MessageHistory) ClearMessages() {
+	h.messages = nil
+}
+
 func (h *MessageHistory) AppendAssistant(resp llm.Response) {
 	h.messages = append(h.messages, llm.Message{
 		Role:      llm.RoleAssistant,

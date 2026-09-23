@@ -5,6 +5,7 @@ import "fmt"
 type TestMCP struct {
 	runReqCount  int
 	testReqCount int
+	checkCount   int
 }
 
 func NewTestMCP() mcpi {
@@ -128,7 +129,11 @@ Can create`
 
 // checks if the original finding is found in the audit session or not
 func (m *TestMCP) CheckOriginalFinding() string {
-	return "The finding is present."
+	m.checkCount++
+	if m.checkCount >= 3 {
+		return "Finding is not present"
+	}
+	return "Finding is present"
 }
 
 func (m *TestMCP) CheckControlProjects() string {

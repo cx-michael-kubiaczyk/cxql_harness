@@ -65,7 +65,7 @@ func availableTools() []llm.ToolDef {
 					"purpose": map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Information Gathering"},
 					"query":   map[string]any{"type": "string", "description": "The query in the format Language.Group.QueryName"},
 				},
-				"required": []string{"purpose", "language", "group", "query_name"},
+				"required": []string{"purpose", "query"},
 			},
 		},
 		{
@@ -78,7 +78,7 @@ func availableTools() []llm.ToolDef {
 					"query":   map[string]any{"type": "string", "description": "The query in the format Language.Group.QueryName"},
 					"level":   map[string]any{"type": "string", "description": "The query level: Product, Tenant, or Application"},
 				},
-				"required": []string{"purpose", "language", "group", "query_name"},
+				"required": []string{"purpose", "query"},
 			},
 		},
 		{
@@ -91,7 +91,7 @@ func availableTools() []llm.ToolDef {
 					"query":   map[string]any{"type": "string", "description": "The query in the format Language.Group.QueryName"},
 					"code":    map[string]any{"type": "string", "description": "Complete CxQL source code for the query"},
 				},
-				"required": []string{"purpose", "language", "group", "query_name", "code"},
+				"required": []string{"purpose", "query", "code"},
 			},
 		},
 		{
@@ -104,7 +104,7 @@ func availableTools() []llm.ToolDef {
 					"language": map[string]any{"type": "string", "description": "The language for the query as provided by other tool calls, the first part of the query when written in the format Language.Group.QueryName"},
 					"code":     map[string]any{"type": "string", "description": "Complete CxQL source code for the query"},
 				},
-				"required": []string{"purpose", "language", "group", "query_name", "code"},
+				"required": []string{"purpose", "language", "code"},
 			},
 		},
 	}
