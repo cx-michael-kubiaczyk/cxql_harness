@@ -76,13 +76,14 @@ func availableTools() []llm.ToolDef {
 				"properties": map[string]any{
 					"purpose": map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Information Gathering"},
 					"query":   map[string]any{"type": "string", "description": "The query in the format Language.Group.QueryName"},
+					"level":   map[string]any{"type": "string", "description": "The query level: Product, Tenant, or Application"},
 				},
 				"required": []string{"purpose", "language", "group", "query_name"},
 			},
 		},
 		{
 			Name:        tooldef.ToolUpdateQuery,
-			Description: "Update the code for a query.",
+			Description: "Update the code for an application-level query override.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

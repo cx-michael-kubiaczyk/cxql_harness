@@ -36,6 +36,13 @@ func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int, 
 	}
 }
 
+const (
+	QUERY_LEVEL_PROJECT     = "Project"
+	QUERY_LEVEL_APPLICATION = "Application"
+	QUERY_LEVEL_TENANT      = "Tenant"
+	QUERY_LEVEL_PRODUCT     = "Product"
+)
+
 // Run initialises a session for the given finding URL and drives the reasoning
 // loop until the finding is resolved or maxIter is reached.
 func (h *Harness) Run(ctx context.Context, findingURL, userPrompt string, TPList, TNList []string) error {
@@ -172,9 +179,10 @@ func (h *Harness) handleRunQuery(ctx context.Context, messages *MessageHistory, 
 	if err != nil {
 		return err
 	}
+	level := strArg(call.Args, "level")
 
 	h.logger.Infof("Harness handling call to run query: %s.%s.%s", lang, group, name)
-	toolResult := h.mcp.RunQuery(lang, group, name)
+	toolResult := h.mcp.RunQuery(level, lang, group, name)
 	messages.AppendToolResult(tooldef.ToolRunQuery, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolRunQuery)+toolResult)
 
 	// once done, we call the after-tool function
@@ -191,7 +199,7 @@ func (h *Harness) handleSandboxQuery(ctx context.Context, messages *MessageHisto
 	name := "CxDefaultQuery"
 
 	h.logger.Infof("Harness handling call to test cxql: %s.%s.%s", lang, group, name)
-	toolResult := h.mcp.TestQuery(lang, group, name, code)
+	toolResult := h.mcp.TestQuery(QUERY_LEVEL_APPLICATION, lang, group, name, code)
 	if strings.HasPrefix(toolResult, "Error:") {
 		h.logger.Errorf("Failure running query:\n%s", toolResult)
 		last_call, result, err := h.handleQueryError(ctx, messages, call, toolResult)
@@ -217,8 +225,13 @@ func (h *Harness) handleUpdateQuery(ctx context.Context, messages *MessageHistor
 		return err
 	}
 
+	original_code := h.mcp.GetQueryCode(QUERY_LEVEL_APPLICATION, lang, group, name)
+	if strings.HasPrefix(original_code, "Error:") {
+		h.logger.Errorf("Failure getting query:\n%s", original_code)
+	}
+
 	h.logger.Infof("Harness handling call to run query: %s.%s.%s", lang, group, name)
-	toolResult := h.mcp.TestQuery(lang, group, name, code)
+	toolResult := h.mcp.TestQuery(QUERY_LEVEL_APPLICATION, lang, group, name, code)
 	if strings.HasPrefix(toolResult, "Error:") {
 		h.logger.Errorf("Failure running query:\n%s", toolResult)
 		last_call, result, err := h.handleQueryError(ctx, messages, call, toolResult)
@@ -230,12 +243,23 @@ func (h *Harness) handleUpdateQuery(ctx context.Context, messages *MessageHistor
 	}
 	messages.AppendToolResult(tooldef.ToolUpdateQuery, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolUpdateQuery)+toolResult)
 
-	// decide to save or not
-	// for now, just save
 	code = strArg(call.Args, "code") // may have changed during error-handling
-	save := h.mcp.SaveQuery(lang, group, name, code)
+	save := h.mcp.SaveQuery(QUERY_LEVEL_APPLICATION, lang, group, name, code)
 	if strings.HasPrefix(save, "Error:") {
 		return fmt.Errorf("Failed to save query: %s", save)
+	}
+
+	// check control projects
+	control := h.mcp.CheckControlProjects()
+	if strings.HasPrefix(control, "Error:") {
+		h.logger.Debugf("Control check failure after updating app-level query %s.%s.%s with code:\n%s\n\n---------\n%s", lang, group, name, code, control)
+		if original_code != "Query doesn't exist" {
+			original_code = strings.TrimSuffix(strings.TrimPrefix(original_code, "```csharp\n"), "\n```\n")
+			save := h.mcp.SaveQuery(QUERY_LEVEL_APPLICATION, lang, group, name, original_code)
+			if strings.HasPrefix(save, "Error:") {
+				return fmt.Errorf("Failed to revert query: %s", save)
+			}
+		}
 	}
 
 	// once done, we call the after-tool function
@@ -302,7 +326,7 @@ The source code for %s is:
 
 		last_call.Args["purpose"] = strArg(call.Args, "purpose")
 		h.logger.Infof("Harness handling call to run query: %s.%s.%s", lang, group, name)
-		last_result = h.mcp.TestQuery(lang, group, name, code)
+		last_result = h.mcp.TestQuery(QUERY_LEVEL_APPLICATION, lang, group, name, code)
 		if strings.HasPrefix(last_result, "Error:") {
 			toolResult = last_result
 			return fmt.Errorf("Query has error")

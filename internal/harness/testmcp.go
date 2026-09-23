@@ -43,6 +43,10 @@ func (m *TestMCP) GetCurrentProjectID() string {
 	return "123"
 }
 
+func (m *TestMCP) GetQueryCode(level, lang, group, name string) string {
+	return "some code"
+}
+
 func (m *TestMCP) ConfigureCustomPreset(presetName string) string {
 	return "Created custom preset with query xxx"
 }
@@ -132,7 +136,7 @@ func (m *TestMCP) CheckControlProjects() string {
 }
 
 // runs an existing query and returns the results (which may be multiple dataflow paths)
-func (m *TestMCP) RunQuery(language, group, query string) string {
+func (m *TestMCP) RunQuery(level, language, group, query string) string {
 	m.runReqCount++
 	switch m.runReqCount {
 	case 1:
@@ -143,7 +147,7 @@ func (m *TestMCP) RunQuery(language, group, query string) string {
 }
 
 // runs an updated version of a CxQL query, without saving the changes, and returns the results (which may be multiple dataflow paths)
-func (m *TestMCP) TestQuery(language, group, query, code string) string {
+func (m *TestMCP) TestQuery(level, language, group, query, code string) string {
 	m.testReqCount++
 	switch m.testReqCount {
 	case 1:
@@ -157,6 +161,6 @@ result = base.Find_(); // audit: Error: 'DynamicQuery_Runner.JavaScript.Corp.Gen
 }
 
 // saves an updated version of a CxQL query based on the last successful RunQuery call.
-func (m *TestMCP) SaveQuery(language, group, query, code string) string {
+func (m *TestMCP) SaveQuery(level, language, group, query, code string) string {
 	return ""
 }

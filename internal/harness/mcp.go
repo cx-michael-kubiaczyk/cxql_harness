@@ -34,6 +34,9 @@ type mcpi interface {
 	// returns the CxQL hierarchy + source code for a given query, eg: Missing_HSTS_Header
 	GetQueryInfoFiltered(language, group, name string, view, edit []bool) string
 
+	// returns the source code of the query (if it exists) else "No such query" error
+	GetQueryCode(level, language, group, query string) string
+
 	// checks if the original finding is found in the audit session or not
 	CheckOriginalFinding() string
 
@@ -41,11 +44,11 @@ type mcpi interface {
 	CheckControlProjects() string
 
 	// runs an existing query and returns the results (which may be multiple dataflow paths)
-	RunQuery(language, group, query string) string
+	RunQuery(level, language, group, query string) string
 
 	// runs an updated version of a CxQL query, without saving the changes, and returns the results (which may be multiple dataflow paths)
-	TestQuery(language, group, query, code string) string
+	TestQuery(level, language, group, query, code string) string
 
 	// saves an updated version of a CxQL query based on the last successful RunQuery call.
-	SaveQuery(language, group, query, code string) string
+	SaveQuery(level, language, group, query, code string) string
 }
