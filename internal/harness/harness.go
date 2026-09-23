@@ -28,7 +28,19 @@ type Harness struct {
 	changelog      *Changelog
 	verbose        bool
 	msgCount       int
+	infoStreak     int // consecutive get_query_info/run_query calls with no mutating tool call in between
 }
+
+// Info-gathering tool calls (get_query_info, run_query) don't change state; a weak
+// or under-guided model can loop on them indefinitely, restating the same
+// conclusion instead of acting on it. After infoStreakNudge consecutive
+// info-only cycles, the prompt is strengthened to push toward action; after
+// infoStreakForce, the info-gathering tools are removed from the choice
+// entirely so the model must call update_query, sandbox, or restore_query.
+const (
+	infoStreakNudge = 3
+	infoStreakForce = 5
+)
 
 func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int, verbose bool) *Harness {
 	if err := resetMessagesDir(messagesDir); err != nil {
@@ -67,7 +79,7 @@ func (h *Harness) Run(ctx context.Context, findingURL, userPrompt string, TPList
 	if err := h.initSession(ctx, findingURL, TPList, TNList); err != nil {
 		return fmt.Errorf("init session: %s", err)
 	}
-	return h.runLoop(ctx)
+	return h.runLoop(ctx, userPrompt)
 }
 
 func (h *Harness) initSession(_ context.Context, findingURL string, TPList, TNList []string) error {
@@ -80,7 +92,7 @@ func (h *Harness) initSession(_ context.Context, findingURL string, TPList, TNLi
 
 // runLoop is the top-level state machine. Each iteration is one LLM call that
 // produces either a tool invocation or a final text answer.
-func (h *Harness) runLoop(ctx context.Context) error {
+func (h *Harness) runLoop(ctx context.Context, userPrompt string) error {
 	/*
 		The MCP server manages the state of an application/environment
 		Some properties of the environment do not change:
@@ -123,6 +135,9 @@ When addressing false-positive results in a finding, the process follows these s
 Query changes are restricted to the Application level for compliance reasons: you must never create, edit, or save Project-level query overrides, and Product-level queries cannot be modified at all.
 `,
 	)
+	if strings.TrimSpace(userPrompt) != "" {
+		system += "\nAdditional guidance from the operator for this session:\n" + userPrompt + "\n"
+	}
 	messages.SetSystem(system)
 
 	for i := 0; i < h.maxIter; i++ {
@@ -148,10 +163,22 @@ Query changes are restricted to the Application level for compliance reasons: yo
 // the tool calls can be: get query info, run query, and test query
 // the tool call updates the back-end state
 func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error {
+	prompt := promptChooseAction
+	tools := availableTools()
+	switch {
+	case h.infoStreak >= infoStreakForce:
+		h.logger.Warnf("%d consecutive info-gathering calls with no action; forcing a mutating tool choice", h.infoStreak)
+		prompt = promptForceAction
+		tools = mutatingTools()
+	case h.infoStreak >= infoStreakNudge:
+		h.logger.Warnf("%d consecutive info-gathering calls with no action; nudging toward action", h.infoStreak)
+		prompt = promptNudgeAction
+	}
+
 	// The LLM only sees the changelog + notepad summaries here, not the raw
 	// tool traffic from earlier cycles — that scratch buffer is local to a
 	// single cycle and is cleared in handleNotes once it's been summarized.
-	resp, err := h.chat(ctx, messages.History(promptChooseAction, FilterAll.Except(HistoryFilter{Messages: true})), availableTools())
+	resp, err := h.chat(ctx, messages.History(prompt, FilterAll.Except(HistoryFilter{Messages: true})), tools)
 	if err != nil {
 		return fmt.Errorf("LLM call: %w", err)
 	}
@@ -163,6 +190,13 @@ func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error 
 	messages.AppendAssistant(resp)
 
 	call := resp.ToolCalls[0]
+	switch call.Name {
+	case tooldef.ToolGetQueryInfo, tooldef.ToolRunQuery:
+		h.infoStreak++
+	default:
+		h.infoStreak = 0
+	}
+
 	switch call.Name {
 	case tooldef.ToolGetQueryInfo:
 		return h.handleGetQueryInfo(ctx, messages, call)
@@ -193,8 +227,7 @@ func (h *Harness) handleGetQueryInfo(ctx context.Context, messages *MessageHisto
 	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolGetQueryInfo)+toolResult)
 
 	// once done, we call the after-tool function
-	h.afterTool(ctx, messages, call)
-	return nil
+	return h.afterTool(ctx, messages, call)
 }
 
 // handleRunQuery runs an existing query and pages the results through the LLM.
@@ -210,8 +243,7 @@ func (h *Harness) handleRunQuery(ctx context.Context, messages *MessageHistory, 
 	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolRunQuery)+toolResult)
 
 	// once done, we call the after-tool function
-	h.afterTool(ctx, messages, call)
-	return nil
+	return h.afterTool(ctx, messages, call)
 }
 
 // handleRestoreQuery reverts an Application-level query override to the
@@ -227,8 +259,7 @@ func (h *Harness) handleRestoreQuery(ctx context.Context, messages *MessageHisto
 	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolRestoreQuery)+toolResult)
 
 	// once done, we call the after-tool function
-	h.afterTool(ctx, messages, call)
-	return nil
+	return h.afterTool(ctx, messages, call)
 }
 
 // handleSandboxQuery runs an existing query and pages the results through the LLM.
@@ -256,8 +287,7 @@ func (h *Harness) handleSandboxQuery(ctx context.Context, messages *MessageHisto
 	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolSandbox)+toolResult)
 
 	// once done, we call the after-tool function
-	h.afterTool(ctx, messages, call)
-	return nil
+	return h.afterTool(ctx, messages, call)
 }
 
 // handleUpdateQuery tests a modified query. On compile success it auto-saves and
@@ -308,8 +338,7 @@ func (h *Harness) handleUpdateQuery(ctx context.Context, messages *MessageHistor
 	}
 
 	// once done, we call the after-tool function
-	h.afterTool(ctx, messages, call)
-	return nil
+	return h.afterTool(ctx, messages, call)
 }
 
 func (h *Harness) handleQueryError(ctx context.Context, messages *MessageHistory, call llm.ToolCall, toolResult string) (last_call llm.ToolCall, last_result string, err error) {

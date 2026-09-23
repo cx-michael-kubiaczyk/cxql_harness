@@ -122,6 +122,19 @@ func availableTools() []llm.ToolDef {
 	}
 }
 
+// mutatingTools returns only the tools that change query state (update_query,
+// restore_query, sandbox), for use once the harness has forced the model past
+// an info-gathering loop and it must act rather than keep inspecting.
+func mutatingTools() []llm.ToolDef {
+	var out []llm.ToolDef
+	for _, t := range availableTools() {
+		if t.Name == tooldef.ToolUpdateQuery || t.Name == tooldef.ToolRestoreQuery || t.Name == tooldef.ToolSandbox {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func getToolDef(name string) []llm.ToolDef {
 	tools := availableTools()
 	for _, t := range tools {
