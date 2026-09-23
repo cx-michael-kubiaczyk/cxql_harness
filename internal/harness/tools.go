@@ -95,6 +95,18 @@ func availableTools() []llm.ToolDef {
 			},
 		},
 		{
+			Name:        tooldef.ToolRestoreQuery,
+			Description: "Revert an Application-level query override back to the version it had before your first edit in this session, undoing any saved changes.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"purpose": map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Undo a regression introduced by the last edit"},
+					"query":   map[string]any{"type": "string", "description": "The query in the format Language.Group.QueryName"},
+				},
+				"required": []string{"purpose", "query"},
+			},
+		},
+		{
 			Name:        tooldef.ToolSandbox,
 			Description: "Test CxQL code without changing existing queries.",
 			Parameters: map[string]any{

@@ -47,7 +47,9 @@ func (m *TestMCP) GetCurrentProjectID() string {
 func (m *TestMCP) GetQueryCode(level, lang, group, name string) string {
 	return "some code"
 }
-
+func (m *TestMCP) RestoreQuery(level, language, group, query string) string {
+	return fmt.Sprintf("Query %s.%s.%s restored to its original version.", language, group, query)
+}
 func (m *TestMCP) ConfigureCustomPreset(presetName string) string {
 	return "Created custom preset with query xxx"
 }

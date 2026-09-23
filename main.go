@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -13,23 +12,22 @@ import (
 	"github.com/cxpsemea/Cx1ClientGo"
 	"github.com/cxpsemea/cxql-harness/internal/harness"
 	"github.com/cxpsemea/cxql-harness/internal/llm"
+	"github.com/cxpsemea/cxql-harness/internal/logging"
 	"github.com/cxpsemea/cxqlmcp/mcp"
 	"github.com/sirupsen/logrus"
 	easy "github.com/t-tomalak/logrus-easy-formatter"
 )
 
 func main() {
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
 	myformatter := &easy.Formatter{}
 	myformatter.TimestampFormat = "2006-01-02 15:04:05.000"
 	myformatter.LogFormat = "[%lvl%][%time%] %msg%\n"
-	logger.SetFormatter(myformatter)
 
-	f, _ := os.Create("log.txt")
-	defer f.Close()
-	outwriter := io.MultiWriter(os.Stdout, f)
-	logger.SetOutput(outwriter)
+	logger, closeLog, err := logging.New("log.txt", logrus.InfoLevel, myformatter)
+	if err != nil {
+		log.Fatalf("failed to open log.txt: %v", err)
+	}
+	defer closeLog()
 
 	backend := flag.String("backend", "ollama", "LLM backend: ollama, openai, anthropic")
 	model := flag.String("model", "", "Model name (default depends on backend)")
@@ -42,7 +40,6 @@ func main() {
 	httpClient := &http.Client{}
 	var llmClient llm.LLM
 	var h *harness.Harness
-	var err error
 
 	test := false
 	if !test {

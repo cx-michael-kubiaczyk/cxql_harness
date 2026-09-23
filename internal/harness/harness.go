@@ -170,6 +170,8 @@ func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error 
 		return h.handleRunQuery(ctx, messages, call)
 	case tooldef.ToolUpdateQuery:
 		return h.handleUpdateQuery(ctx, messages, call)
+	case tooldef.ToolRestoreQuery:
+		return h.handleRestoreQuery(ctx, messages, call)
 	case tooldef.ToolSandbox:
 		return h.handleSandboxQuery(ctx, messages, call)
 	default:
@@ -206,6 +208,23 @@ func (h *Harness) handleRunQuery(ctx context.Context, messages *MessageHistory, 
 	h.logger.Infof("Harness handling call to run query: %s.%s.%s", lang, group, name)
 	toolResult := h.mcp.RunQuery(level, lang, group, name)
 	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolRunQuery)+toolResult)
+
+	// once done, we call the after-tool function
+	h.afterTool(ctx, messages, call)
+	return nil
+}
+
+// handleRestoreQuery reverts an Application-level query override to the
+// version it had before the first save_query call touched it this session.
+func (h *Harness) handleRestoreQuery(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
+	lang, group, name, err := queryFromStr(strArg(call.Args, "query"))
+	if err != nil {
+		return err
+	}
+
+	h.logger.Infof("Harness handling call to restore query: %s.%s.%s", lang, group, name)
+	toolResult := h.mcp.RestoreQuery(QUERY_LEVEL_APPLICATION, lang, group, name)
+	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolRestoreQuery)+toolResult)
 
 	// once done, we call the after-tool function
 	h.afterTool(ctx, messages, call)
@@ -474,9 +493,9 @@ func (h *Harness) chat(ctx context.Context, messages []llm.Message, tools []llm.
 			fmt.Fprintf(&str, "%s: %s..\n..%s\n", msg.Role, msg.Content[:min], msg.Content[len(msg.Content)-max:])
 		}
 	}
-	h.logger.Info("LLM Receives:\n------------\n", str.String(), "\n==============\n\n")
-
 	h.msgCount++
+	h.logger.Infof("LLM Receives #%d:\n------------\n%s\n==============\n\n", h.msgCount, str.String())
+
 	h.dumpMessageFile(h.msgCount, "in", struct {
 		Messages []llm.Message
 		Tools    []llm.ToolDef
@@ -488,7 +507,7 @@ func (h *Harness) chat(ctx context.Context, messages []llm.Message, tools []llm.
 	}
 
 	msg, _ := json.MarshalIndent(response, "", "  ")
-	h.logger.Info("LLM Responds:\n------------\n", string(msg), "\n==============\n\n")
+	h.logger.Infof("LLM Responds #%d:\n------------\n%s\n==============\n\n", h.msgCount, msg)
 
 	h.dumpMessageFile(h.msgCount, "out", response)
 

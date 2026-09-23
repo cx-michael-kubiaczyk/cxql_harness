@@ -51,4 +51,7 @@ type mcpi interface {
 
 	// saves an updated version of a CxQL query based on the last successful RunQuery call.
 	SaveQuery(level, language, group, query, code string) string
+
+	// restores a query to the original version before any changes
+	RestoreQuery(level, language, group, query string) string
 }
