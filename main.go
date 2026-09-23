@@ -43,10 +43,8 @@ func main() {
 	var h *harness.Harness
 	var err error
 
-	fs := flag.NewFlagSet("testCheck", flag.ContinueOnError)
-	test := fs.Bool("test", false, "Test mode")
-	_ = fs.Parse(os.Args[1:])
-	if !*test {
+	test := false
+	if !test {
 		if *config == "" {
 			fmt.Fprintf(os.Stderr, "A configuration file is required")
 			flag.PrintDefaults()
@@ -91,9 +89,9 @@ func main() {
 	}
 
 	var conf struct {
-		FindingURL string
-		TPList     []string
-		TNList     []string
+		Finding string
+		TPList  []string
+		TNList  []string
 	}
 
 	data, err := os.ReadFile(*config)
@@ -106,7 +104,7 @@ func main() {
 		log.Fatalf("Failed to parse config file %s: %s", *config, err)
 	}
 
-	err = h.Run(context.Background(), conf.FindingURL, *prompt, conf.TPList, conf.TNList)
+	err = h.Run(context.Background(), conf.Finding, *prompt, conf.TPList, conf.TNList)
 	if err != nil {
 		log.Fatalf("harness error: %v", err)
 	}

@@ -54,6 +54,7 @@ func (h *Harness) Run(ctx context.Context, findingURL, userPrompt string, TPList
 }
 
 func (h *Harness) initSession(_ context.Context, findingURL string, TPList, TNList []string) error {
+	h.logger.Infof("Starting session with target %s (TPs: %+s, TNs: %+s)", findingURL, TPList, TNList)
 	if response := strings.TrimSpace(h.mcp.CreateSessionFromURL(findingURL, TPList, TNList)); response != "The session was created successfully and the finding is present." {
 		return fmt.Errorf("CreateSessionFromURL: %s", response)
 	}
