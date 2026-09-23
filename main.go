@@ -20,7 +20,7 @@ import (
 
 func main() {
 	logger := logrus.New()
-	logger.SetLevel(logrus.TraceLevel)
+	logger.SetLevel(logrus.InfoLevel)
 	myformatter := &easy.Formatter{}
 	myformatter.TimestampFormat = "2006-01-02 15:04:05.000"
 	myformatter.LogFormat = "[%lvl%][%time%] %msg%\n"
@@ -33,6 +33,7 @@ func main() {
 
 	backend := flag.String("backend", "ollama", "LLM backend: ollama, openai, anthropic")
 	model := flag.String("model", "", "Model name (default depends on backend)")
+	address := flag.String("address", "http://localhost:11434", "LLM server address")
 	maxIter := flag.Int("max-iter", 20, "Maximum reasoning iterations")
 	prompt := flag.String("prompt", "", "Optional: Guidance to the LLM regarding the problem and/or desired solution")
 	config := flag.String("config", "conf.json", "Configuration file containing target FP, TPList, and TNList - see example-conf.json")
@@ -57,13 +58,15 @@ func main() {
 		}
 		logger.Infof("Initialized client: %s", cx1client.String())
 
+		cx1client.SetDeprecationWarning(false)
+
 		switch *backend {
 		case "ollama":
-			m := "qwen2.5-coder:14b"
+			m := "qwen3-coder:30b"
 			if *model != "" {
 				m = *model
 			}
-			llmClient, err = llm.NewOllama(m)
+			llmClient, err = llm.NewOllama(m, *address)
 		case "openai":
 			m := "gpt-4o"
 			if *model != "" {
@@ -83,9 +86,9 @@ func main() {
 			log.Fatalf("failed to create LLM client: %v", err)
 		}
 
-		h = harness.New(logger, mcp.NewMCP(cx1client, logger), llmClient, *maxIter, true)
+		h = harness.New(logger, mcp.NewMCP(cx1client, logger), llmClient, *maxIter, false)
 	} else {
-		h = harness.New(logger, harness.NewTestMCP(), llm.NewTestLLM(logger), *maxIter, true)
+		h = harness.New(logger, harness.NewTestMCP(), llm.NewTestLLM(logger), *maxIter, false)
 	}
 
 	var conf struct {

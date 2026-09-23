@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cxpsemea/cxql-harness/internal/llm"
 	"github.com/cxpsemea/cxql-harness/internal/tooldef"
 	"github.com/sirupsen/logrus"
 )
+
+// messagesDir is where per-call request/response dumps are written, see chat().
+const messagesDir = "messages"
 
 // Harness drives the false-positive resolution loop.
 type Harness struct {
@@ -22,9 +27,13 @@ type Harness struct {
 	notepad        *Notepad
 	changelog      *Changelog
 	verbose        bool
+	msgCount       int
 }
 
 func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int, verbose bool) *Harness {
+	if err := resetMessagesDir(messagesDir); err != nil {
+		logger.Warnf("Failed to reset messages dir %s: %s", messagesDir, err)
+	}
 	return &Harness{
 		logger:         logger,
 		mcp:            mcpClient,
@@ -35,6 +44,14 @@ func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int, 
 		changelog:      NewChangelog(),
 		verbose:        verbose,
 	}
+}
+
+// resetMessagesDir ensures dir exists and is empty, so each run starts fresh.
+func resetMessagesDir(dir string) error {
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	return os.MkdirAll(dir, 0o755)
 }
 
 const (
@@ -456,7 +473,13 @@ func (h *Harness) chat(ctx context.Context, messages []llm.Message, tools []llm.
 			fmt.Fprintf(&str, "%s: %s..\n..%s\n", msg.Role, msg.Content[:min], msg.Content[len(msg.Content)-max:])
 		}
 	}
-	h.logger.Info("LLM Receives messages:\n", str.String())
+	h.logger.Info("LLM Receives:\n------------\n", str.String(), "\n==============\n\n")
+
+	h.msgCount++
+	h.dumpMessageFile(h.msgCount, "in", struct {
+		Messages []llm.Message
+		Tools    []llm.ToolDef
+	}{messages, tools})
 
 	response, err := h.llm.Chat(ctx, messages, tools)
 	if err != nil {
@@ -464,9 +487,25 @@ func (h *Harness) chat(ctx context.Context, messages []llm.Message, tools []llm.
 	}
 
 	msg, _ := json.MarshalIndent(response, "", "  ")
-	h.logger.Info("LLM Responds:\n", string(msg))
+	h.logger.Info("LLM Responds:\n------------\n", string(msg), "\n==============\n\n")
+
+	h.dumpMessageFile(h.msgCount, "out", response)
 
 	return response, err
+}
+
+// dumpMessageFile writes v as indented JSON to messages/{num}_{suffix}.txt for
+// later review of exactly what was sent to and received from the LLM.
+func (h *Harness) dumpMessageFile(num int, suffix string, v any) {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		h.logger.Warnf("Failed to marshal %s for message %d: %s", suffix, num, err)
+		return
+	}
+	path := filepath.Join(messagesDir, fmt.Sprintf("%d_%s.txt", num, suffix))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		h.logger.Warnf("Failed to write %s: %s", path, err)
+	}
 }
 
 func queryFromStr(query string) (string, string, string, error) {
