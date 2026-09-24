@@ -34,7 +34,7 @@ type Harness struct {
 	changelog      *Changelog
 	verbose        bool
 	msgCount       int
-	infoStreak     int       // consecutive get_query_info/run_query calls with no mutating tool call in between
+	infoStreak     int        // consecutive get_query_info/run_query calls with no mutating tool call in between
 	exchanges      []Exchange // full transcript of LLM exchanges, for the messages/{n}.json log and viewer.html
 }
 
@@ -160,11 +160,12 @@ Queries under the special language "Common" (e.g. Common_Medium_Threat.*) are sh
 		if err != nil {
 			return fmt.Errorf("failed step: %s", err)
 		}
-		passed, err := h.TestsPassed()
+		status, passed, err := h.TestsPassed()
 		if err != nil {
 			return fmt.Errorf("check tests passed: %w", err)
 		}
 		if passed {
+			h.logger.Info(status)
 			return nil
 		}
 	}
@@ -599,23 +600,23 @@ func (h *Harness) getChangelog() string {
 	return "This is the immutable changelog listing actions executed thus far:\n" + h.changelog.GetChangelog()
 }
 
-func (h *Harness) TestsPassed() (bool, error) {
+func (h *Harness) TestsPassed() (string, bool, error) {
 	control := h.mcp.CheckControlProjects()
 	if strings.HasPrefix(control, "Error:") {
-		return false, errors.New(control)
+		return "", false, errors.New(control)
 	}
 	if strings.HasPrefix(control, "Regression:") {
-		return false, nil
+		return control, false, nil
 	}
 
 	status := h.mcp.CheckOriginalFinding()
 	if strings.HasPrefix(status, "Error:") {
-		return false, errors.New(status)
+		return control, false, errors.New(status)
 	}
 	if status == "Finding is present" { // expecting to remove the FP
-		return false, nil
+		return control + "\n" + status, false, nil
 	}
-	return true, nil
+	return control + "\n" + status, true, nil
 }
 
 // invalidQueryArg records a malformed "query" argument (e.g. missing a

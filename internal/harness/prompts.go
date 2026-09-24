@@ -6,7 +6,8 @@ const promptChooseAction = "What would you like to do next? Use one of the avail
 const promptNotesOnResults = "Summarize what you observe in these results and how it relates to the false positive. " +
 	"Check the changelog first: if this result only confirms a conclusion you already recorded, say so explicitly and note that no new information was gained, rather than restating it as a new finding. " +
 	"Then check your notepad for Task notes: if the call you just made is the action a Task note told you to take, that task is now done — delete it with notes_to_delete in this same call. Do not leave a completed Task note sitting in the notepad; a future turn should never see a Task telling you to do something the changelog shows you already did. " +
-	resultsSemanticsReminder
+	resultsSemanticsReminder +
+	"You cannot call any tools except tool_review in this turn."
 const promptDebugQuery = "Provide updated code to address the errors."
 
 // resultsSemanticsReminder corrects a specific, observed misreading: a run
