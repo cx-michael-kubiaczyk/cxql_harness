@@ -115,7 +115,8 @@ func (h *Harness) runLoop(ctx context.Context, userPrompt string) error {
 	}
 	messages := NewHistory()
 
-	system := fmt.Sprintf("You are an agent in charge of updating C# code which is used to evaluate source code and discover vulnerabilities.\n%s\n%s\n",
+	system := fmt.Sprintf("You are an agent in charge of updating C# code which is used to evaluate source code and discover vulnerabilities.\n%s\n%s\n%s\n",
+		cxqlSyntaxReminder,
 		findingDetails,
 		`When a CxSAST scan runs, various "CxQL queries" (written as C# code modules) are run against an AST (abstract syntax tree) representation of a codebase.
 Each query returns a list of items representing nodes or dataflow paths through the AST.
@@ -178,14 +179,32 @@ func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error 
 	// The LLM only sees the changelog + notepad summaries here, not the raw
 	// tool traffic from earlier cycles — that scratch buffer is local to a
 	// single cycle and is cleared in handleNotes once it's been summarized.
-	resp, err := h.chat(ctx, messages.History(prompt, FilterAll.Except(HistoryFilter{Messages: true})), tools)
+	//
+	// A local model occasionally replies with plain text instead of a tool
+	// call, or names a tool that doesn't exist. Both are recoverable model
+	// mistakes, not harness failures, so they get a few corrective retries
+	// before giving up — rather than aborting the entire run over one bad turn.
+	var resp llm.Response
+	err := h.withRetries("choose next action", 3, func() error {
+		var chatErr error
+		resp, chatErr = h.chat(ctx, messages.History(prompt, FilterAll.Except(HistoryFilter{Messages: true})), tools)
+		if chatErr != nil {
+			return fmt.Errorf("LLM call: %w", chatErr)
+		}
+		if len(resp.ToolCalls) == 0 {
+			h.logger.Warnf("Choose-action turn produced no tool call, retrying. Response was: %s", resp.Content)
+			prompt = "You must respond with exactly one tool call from the available tools — a plain text reply is not accepted here. " + promptChooseAction
+			return fmt.Errorf("no tool call generated")
+		}
+		if getToolDef(resp.ToolCalls[0].Name) == nil {
+			h.logger.Warnf("Choose-action turn named an unknown tool %q, retrying", resp.ToolCalls[0].Name)
+			prompt = fmt.Sprintf("%q is not one of the available tools. Choose one from the list provided. %s", resp.ToolCalls[0].Name, promptChooseAction)
+			return fmt.Errorf("unknown tool: %s", resp.ToolCalls[0].Name)
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("LLM call: %w", err)
-	}
-
-	if len(resp.ToolCalls) == 0 {
-		// LLM produced a plain text response — it may be an error
-		return fmt.Errorf("No tool call generated, response was: %s", resp.Content)
 	}
 	messages.AppendAssistant(resp)
 
@@ -218,7 +237,7 @@ func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error 
 func (h *Harness) handleGetQueryInfo(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
 	lang, group, name, err := queryFromStr(strArg(call.Args, "query"))
 	if err != nil {
-		return err
+		return h.invalidQueryArg(ctx, messages, call, err)
 	}
 	h.logger.Infof("Harness handling call to get query info: %s.%s.%s", lang, group, name)
 
@@ -234,7 +253,7 @@ func (h *Harness) handleGetQueryInfo(ctx context.Context, messages *MessageHisto
 func (h *Harness) handleRunQuery(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
 	lang, group, name, err := queryFromStr(strArg(call.Args, "query"))
 	if err != nil {
-		return err
+		return h.invalidQueryArg(ctx, messages, call, err)
 	}
 	level := strArg(call.Args, "level")
 
@@ -251,7 +270,7 @@ func (h *Harness) handleRunQuery(ctx context.Context, messages *MessageHistory, 
 func (h *Harness) handleRestoreQuery(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
 	lang, group, name, err := queryFromStr(strArg(call.Args, "query"))
 	if err != nil {
-		return err
+		return h.invalidQueryArg(ctx, messages, call, err)
 	}
 
 	h.logger.Infof("Harness handling call to restore query: %s.%s.%s", lang, group, name)
@@ -265,7 +284,10 @@ func (h *Harness) handleRestoreQuery(ctx context.Context, messages *MessageHisto
 // handleSandboxQuery runs an existing query and pages the results through the LLM.
 func (h *Harness) handleSandboxQuery(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
 	code := strArg(call.Args, "code")
-	lang := strArg(call.Args, "language")
+	// The model is meant to pass just the language segment (e.g. "javascript"),
+	// but sometimes echoes the full Language.Group.QueryName string instead;
+	// take only the first segment so the synthesized query id below stays valid.
+	lang, _, _ := strings.Cut(strArg(call.Args, "language"), ".")
 
 	group := "CxDefaultQueryGroup"
 	name := "CxDefaultQuery"
@@ -279,7 +301,14 @@ func (h *Harness) handleSandboxQuery(ctx context.Context, messages *MessageHisto
 		call.Args["query"] = lang + "." + group + "." + name
 		last_call, result, err := h.handleQueryError(ctx, messages, call, toolResult)
 		if err != nil {
-			return err
+			// Exhausting retries on one sandbox attempt shouldn't kill the whole
+			// run: record the failure and let the model pick a different approach
+			// on its next turn instead of losing all remaining iteration budget.
+			h.logger.Warnf("Giving up on this sandbox attempt after repeated failures: %s", err)
+			messages.AppendToolResult(call.ID, fmt.Sprintf(
+				"The call to %s could not be made to compile after multiple attempts. Last error:\n%s\nAbandon this specific code and try a different approach.",
+				tooldef.ToolSandbox, err))
+			return h.afterTool(ctx, messages, call)
 		}
 		toolResult = result
 		call = last_call
@@ -296,7 +325,7 @@ func (h *Harness) handleUpdateQuery(ctx context.Context, messages *MessageHistor
 	code := strArg(call.Args, "code")
 	lang, group, name, err := queryFromStr(strArg(call.Args, "query"))
 	if err != nil {
-		return err
+		return h.invalidQueryArg(ctx, messages, call, err)
 	}
 
 	original_code := h.mcp.GetQueryCode(QUERY_LEVEL_APPLICATION, lang, group, name)
@@ -310,7 +339,14 @@ func (h *Harness) handleUpdateQuery(ctx context.Context, messages *MessageHistor
 		h.logger.Errorf("Failure running query:\n%s", toolResult)
 		last_call, result, err := h.handleQueryError(ctx, messages, call, toolResult)
 		if err != nil {
-			return err
+			// As with sandbox: nothing has been saved yet at this point, so it's
+			// safe to give up on this attempt without corrupting query state.
+			// Record the failure and keep the run alive instead of aborting it.
+			h.logger.Warnf("Giving up on this update_query attempt after repeated failures: %s", err)
+			messages.AppendToolResult(call.ID, fmt.Sprintf(
+				"The call to %s could not be made to compile after multiple attempts, and was NOT saved. Last error:\n%s\nAbandon this specific code and try a different approach.",
+				tooldef.ToolUpdateQuery, err))
+			return h.afterTool(ctx, messages, call)
 		}
 		toolResult = result
 		call = last_call
@@ -361,9 +397,9 @@ func (h *Harness) handleQueryError(ctx context.Context, messages *MessageHistory
 		fullHist := false
 		if fullHist {
 			hist = messages.CloneHistory()
-			hist.SetSystem("Review the history of events that lead to the error(s) in this query. Update the code to address ")
+			hist.SetSystem(cxqlSyntaxReminder + "Review the history of events that lead to the error(s) in this query. Update the code to address it.")
 		} else {
-			hist.SetSystem("Update the code to address any errors.")
+			hist.SetSystem(cxqlSyntaxReminder + "Update the code to address any errors.")
 		}
 		hist.AppendToolResult(call.Name, fmt.Sprintf(`The call to %s returned the following:
 `+"```"+`
@@ -419,23 +455,26 @@ The source code for %s is:
 }
 
 func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory, prevCall llm.ToolCall) error {
-	resp, err := h.chat(ctx, messages.History(promptNotesOnResults, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false})), notepadTool())
+	prompt := promptNotesOnResults
+	var resp llm.Response
+	err := h.withRetries("summarize tool result", 3, func() error {
+		var chatErr error
+		resp, chatErr = h.chat(ctx, messages.History(prompt, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false})), notepadTool())
+		if chatErr != nil {
+			return fmt.Errorf("LLM call: %w", chatErr)
+		}
+		if len(resp.ToolCalls) == 0 || resp.ToolCalls[0].Name != tooldef.ToolReview {
+			h.logger.Warnf("Note-taking turn did not call %s, retrying. Response was: %s", tooldef.ToolReview, resp.Content)
+			prompt = fmt.Sprintf("You must respond with exactly one call to %s. %s", tooldef.ToolReview, promptNotesOnResults)
+			return fmt.Errorf("no valid %s call generated", tooldef.ToolReview)
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("LLM call: %w", err)
 	}
 
-	if len(resp.ToolCalls) == 0 {
-		// LLM produced a plain text response — it may be an error
-		return fmt.Errorf("No tool call generated, response was: %s", resp.Content)
-	}
-
-	call := resp.ToolCalls[0]
-
-	if call.Name == tooldef.ToolReview {
-		return h.handleNotes(ctx, messages, call, prevCall)
-	} else {
-		return fmt.Errorf("unknown tool: %s", call.Name)
-	}
+	return h.handleNotes(ctx, messages, resp.ToolCalls[0], prevCall)
 }
 
 func (h *Harness) handleNotes(ctx context.Context, messages *MessageHistory, call llm.ToolCall, prevCall llm.ToolCall) error {
@@ -500,6 +539,19 @@ func (h *Harness) TestsPassed() (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// invalidQueryArg records a malformed "query" argument (e.g. missing a
+// Language.Group.QueryName segment) as a soft failure fed back to the model,
+// instead of letting the raw parse error abort the whole run — local models
+// frequently get this format wrong, and it's entirely recoverable: the model
+// just needs to see what was wrong and try again.
+func (h *Harness) invalidQueryArg(ctx context.Context, messages *MessageHistory, call llm.ToolCall, parseErr error) error {
+	h.logger.Warnf("Rejecting malformed query argument %q for %s: %s", strArg(call.Args, "query"), call.Name, parseErr)
+	messages.AppendToolResult(call.ID, fmt.Sprintf(
+		"Error: invalid \"query\" argument %q — %s. The query must be in the exact format Language.Group.QueryName (three dot-separated parts), e.g. javascript.Common_Medium_Threat.Missing_HSTS_Header.",
+		strArg(call.Args, "query"), parseErr))
+	return h.afterTool(ctx, messages, call)
 }
 
 func strArg(args map[string]any, key string) string {
