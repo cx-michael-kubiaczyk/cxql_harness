@@ -428,13 +428,6 @@ func (h *Harness) handleQueryError(ctx context.Context, messages *MessageHistory
 		} else {
 			hist.SetSystem(cxqlSyntaxReminder + "Update the code to address any errors.")
 		}
-		// Notes carry the model's own current reasoning (e.g. "this helper
-		// doesn't exist") which is directly relevant to fixing a compile
-		// error; the changelog is excluded below as a much larger, less
-		// directly useful audit trail for this narrow, mechanical retry loop.
-		// Set on every attempt (not just once) since CloneHistory() above
-		// replaces hist wholesale and would otherwise wipe this out.
-		hist.SetNotes(h.getNotes())
 		hist.AppendToolResult(call.Name, fmt.Sprintf(`The call to %s returned the following:
 `+"```"+`
 %s
@@ -447,7 +440,7 @@ The source code for %s is:
 `, call.Name, toolResult, query, code))
 
 		err = h.withRetries("Generate fixed query "+query, 3, func() error {
-			resp, err = h.chatLogged(ctx, CallSiteDebugQuery, &hist, promptDebugQuery, FilterAll.Except(HistoryFilter{Changelog: true}), lastToolDef)
+			resp, err = h.chatLogged(ctx, CallSiteDebugQuery, &hist, promptDebugQuery, FilterAll.Except(HistoryFilter{Changelog: true, Notes: true}), lastToolDef)
 			if err != nil {
 				return fmt.Errorf("LLM call: %w", err)
 			}
