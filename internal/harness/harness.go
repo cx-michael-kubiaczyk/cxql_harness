@@ -115,8 +115,9 @@ func (h *Harness) runLoop(ctx context.Context, userPrompt string) error {
 	}
 	messages := NewHistory()
 
-	system := fmt.Sprintf("You are an agent in charge of updating C# code which is used to evaluate source code and discover vulnerabilities.\n%s\n%s\n%s\n",
+	system := fmt.Sprintf("You are an agent in charge of updating C# code which is used to evaluate source code and discover vulnerabilities.\n%s\n%s\n%s\n%s\n",
 		cxqlSyntaxReminder,
+		resultsSemanticsReminder,
 		findingDetails,
 		`When a CxSAST scan runs, various "CxQL queries" (written as C# code modules) are run against an AST (abstract syntax tree) representation of a codebase.
 Each query returns a list of items representing nodes or dataflow paths through the AST.
