@@ -1,6 +1,9 @@
 package harness
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type TestMCP struct {
 	runReqCount  int
@@ -127,6 +130,16 @@ Doesn't exist, cannot create (out of scope)
 
 [APPLICATION-LEVEL QUERY INFO]
 Can create`
+}
+
+// searches the names of all known queries for a substring and returns each
+// match's full Language.Group.QueryName path
+func (m *TestMCP) SearchQueries(substring string) string {
+	if strings.Contains(strings.ToLower("Find_HSTS_Sanitize"), strings.ToLower(substring)) {
+		return `Queries with a name containing "` + substring + `":
+- JavaScript.General.Find_HSTS_Sanitize (defined at: Product)`
+	}
+	return `No queries found with a name containing "` + substring + `".`
 }
 
 // checks if the original finding is found in the audit session or not

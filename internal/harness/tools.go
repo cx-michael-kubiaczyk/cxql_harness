@@ -69,6 +69,18 @@ func availableTools() []llm.ToolDef {
 			},
 		},
 		{
+			Name:        tooldef.ToolSearchQueries,
+			Description: "Search the names of all known queries for a substring. Use this to find a query's Language.Group.QueryName path when you only know its short name (e.g. a sanitizer helper referenced by another query), instead of guessing at get_query_info with different group names.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"purpose":   map[string]any{"type": "string", "description": "Purpose for this tool call, e.g. Locate the group for a helper query seen in another query's source"},
+					"substring": map[string]any{"type": "string", "description": "Text to search for within query names, e.g. HSTS_Sanitize"},
+				},
+				"required": []string{"purpose", "substring"},
+			},
+		},
+		{
 			Name:        tooldef.ToolRunQuery,
 			Description: "Run an existing CxQL query as-is and view its results shown inline with the source code.",
 			Parameters: map[string]any{

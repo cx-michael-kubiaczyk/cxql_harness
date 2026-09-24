@@ -222,7 +222,7 @@ func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error 
 
 	call := resp.ToolCalls[0]
 	switch call.Name {
-	case tooldef.ToolGetQueryInfo, tooldef.ToolRunQuery:
+	case tooldef.ToolGetQueryInfo, tooldef.ToolRunQuery, tooldef.ToolSearchQueries:
 		h.infoStreak++
 	default:
 		h.infoStreak = 0
@@ -231,6 +231,8 @@ func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error 
 	switch call.Name {
 	case tooldef.ToolGetQueryInfo:
 		return h.handleGetQueryInfo(ctx, messages, call)
+	case tooldef.ToolSearchQueries:
+		return h.handleSearchQueries(ctx, messages, call)
 	case tooldef.ToolRunQuery:
 		return h.handleRunQuery(ctx, messages, call)
 	case tooldef.ToolUpdateQuery:
@@ -256,6 +258,19 @@ func (h *Harness) handleGetQueryInfo(ctx context.Context, messages *MessageHisto
 	// loop over querygetinfo, if it starts with "Error:" then retry (with error in history)
 	toolResult := h.mcp.GetQueryInfoFiltered(lang, group, name, []bool{true, true, true, false}, []bool{false, false, true, false})
 	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolGetQueryInfo)+toolResult)
+
+	// once done, we call the after-tool function
+	return h.afterTool(ctx, messages, call)
+}
+
+// handleSearchQueries looks up a query's group from its short name, so the
+// model doesn't have to guess at get_query_info with different group names.
+func (h *Harness) handleSearchQueries(ctx context.Context, messages *MessageHistory, call llm.ToolCall) error {
+	substring := strArg(call.Args, "substring")
+	h.logger.Infof("Harness handling call to search queries: %q", substring)
+
+	toolResult := h.mcp.SearchQueries(substring)
+	messages.AppendToolResult(call.ID, fmt.Sprintf("The call to %s returned the following:\n", tooldef.ToolSearchQueries)+toolResult)
 
 	// once done, we call the after-tool function
 	return h.afterTool(ctx, messages, call)
@@ -482,10 +497,23 @@ func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory, prevC
 		if chatErr != nil {
 			return fmt.Errorf("LLM call: %w", chatErr)
 		}
-		if len(resp.ToolCalls) == 0 || resp.ToolCalls[0].Name != tooldef.ToolReview {
-			h.logger.Warnf("Note-taking turn did not call %s, retrying. Response was: %s", tooldef.ToolReview, resp.Content)
+		if len(resp.ToolCalls) == 0 {
+			h.logger.Warnf("Note-taking turn produced no tool call, retrying. Response was: %s", resp.Content)
 			prompt = fmt.Sprintf("You must respond with exactly one call to %s. %s", tooldef.ToolReview, promptNotesOnResults)
-			return fmt.Errorf("no valid %s call generated", tooldef.ToolReview)
+			return fmt.Errorf("no tool call generated")
+		}
+		if resp.ToolCalls[0].Name != tooldef.ToolReview {
+			// The model tried to take a real action (e.g. get_query_info,
+			// search_queries) instead of summarizing. That call is often the
+			// model's best lead — observed in practice to be a *correct* next
+			// step that then vanished for good when this branch simply
+			// discarded it and re-asked, because the rejected attempt was
+			// never added to history and the model had no memory of having
+			// proposed it. Preserve it as an explicit task note instead of
+			// scolding the model into forgetting it, then synthesize the
+			// required tool_review call ourselves so no retry is spent on it.
+			h.logger.Warnf("Note-taking turn called %s instead of %s; capturing it as a task note. Response was: %s", resp.ToolCalls[0].Name, tooldef.ToolReview, resp.Content)
+			resp.ToolCalls = []llm.ToolCall{synthesizeReviewCapturingAttempt(resp.Content, resp.ToolCalls[0])}
 		}
 		return nil
 	})
@@ -496,10 +524,47 @@ func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory, prevC
 	return h.handleNotes(ctx, messages, resp.ToolCalls[0], prevCall)
 }
 
+// synthesizeReviewCapturingAttempt builds a tool_review call that records a
+// rejected non-tool_review call (made during the note-taking turn, where only
+// tool_review is valid) as an explicit Task note, so the model's idea
+// survives into the next choose-action turn instead of being silently lost.
+func synthesizeReviewCapturingAttempt(content string, attempted llm.ToolCall) llm.ToolCall {
+	arg := strArg(attempted.Args, "query")
+	if arg == "" {
+		arg = strArg(attempted.Args, "substring")
+	}
+	desc := attempted.Name
+	if arg != "" {
+		desc = fmt.Sprintf("%s(%q)", attempted.Name, arg)
+	}
+	purpose := strArg(attempted.Args, "purpose")
+	taskContent := fmt.Sprintf("Next action: call %s. (Purpose given at the time: %s) — this was proposed during a summarize step, where only %s is available, so it was not actually executed. Make this exact call now.", desc, purpose, tooldef.ToolReview)
+
+	summary := strings.TrimSpace(content)
+	if summary == "" {
+		summary = fmt.Sprintf("Recorded intent to call %s as a task for the next turn, since it could not be executed during this summarize step.", desc)
+	}
+
+	return llm.ToolCall{
+		ID:   "auto_" + tooldef.ToolReview,
+		Name: tooldef.ToolReview,
+		Args: map[string]any{
+			"summary": summary,
+			"notes_to_create": []any{
+				map[string]any{"type": "Task", "content": taskContent},
+			},
+		},
+	}
+}
+
 func (h *Harness) handleNotes(ctx context.Context, messages *MessageHistory, call llm.ToolCall, prevCall llm.ToolCall) error {
 	summary := strArg(call.Args, "summary")
 	prevPurpose := strArg(prevCall.Args, "purpose")
-	prevCallString := prevCall.Name + "(\"" + strArg(prevCall.Args, "query") + "\")"
+	prevCallArg := strArg(prevCall.Args, "query")
+	if prevCallArg == "" {
+		prevCallArg = strArg(prevCall.Args, "substring")
+	}
+	prevCallString := prevCall.Name + "(\"" + prevCallArg + "\")"
 	h.changelog.AddToolCall(prevPurpose, summary, prevCallString)
 
 	if items, ok := call.Args["notes_to_create"].([]any); ok {

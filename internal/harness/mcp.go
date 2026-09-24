@@ -34,6 +34,11 @@ type mcpi interface {
 	// returns the CxQL hierarchy + source code for a given query, eg: Missing_HSTS_Header
 	GetQueryInfoFiltered(language, group, name string, view, edit []bool) string
 
+	// searches the names of all known queries for a substring and returns each
+	// match's full Language.Group.QueryName path, so a query's group can be
+	// located from its short name alone instead of guessing at get_query_info
+	SearchQueries(substring string) string
+
 	// returns the source code of the query (if it exists) else "No such query" error
 	GetQueryCode(level, language, group, query string) string
 
