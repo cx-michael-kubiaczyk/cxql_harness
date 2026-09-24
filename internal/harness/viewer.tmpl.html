@@ -1,0 +1,343 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>cxql-harness conversation log</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --card-bg: #fff;
+    --border: #d8d8d8;
+    --text: #222;
+    --muted: #777;
+    --tool-bg: #eef3ff;
+    --tool-border: #6b8afd;
+    --response-border: #2a9d5c;
+    --error-bg: #ffe0e0;
+    --error-border: #cc3333;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  #meta { color: var(--muted); margin-bottom: 16px; }
+  .turn {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 0 0 16px;
+    padding: 10px 14px;
+  }
+  .turn-header {
+    font-weight: 600;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .subsection-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 10px 0 4px;
+  }
+  .section { margin: 4px 0; }
+  .section-header {
+    cursor: pointer;
+    user-select: none;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: #f0f0f0;
+    display: inline-block;
+  }
+  .section-header:hover { background: #e6e6e6; }
+  .section-header::before { content: "\25b8 "; }
+  .section-header.open::before { content: "\25be "; }
+  .section-body {
+    margin: 6px 0 6px 6px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--border);
+  }
+  .section-body[hidden] { display: none; }
+  .section-body pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    font-family: Consolas, Menlo, monospace;
+    font-size: 12.5px;
+  }
+  .line-list { margin: 4px 0; }
+  .trunc {
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .trunc:hover { background: #f0f0f0; }
+  .trunc.expanded {
+    white-space: pre-wrap;
+    text-overflow: unset;
+    overflow: visible;
+    word-break: break-word;
+  }
+  .empty-hint { color: var(--muted); font-style: italic; padding: 2px 6px; }
+  .tool-row {
+    background: var(--tool-bg);
+    border-left: 3px solid var(--tool-border);
+    padding: 4px 8px;
+    margin: 3px 0;
+    border-radius: 3px;
+  }
+  .tool-row .tool-name { font-weight: 600; margin-right: 6px; }
+  .msg-card {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin: 4px 0;
+    padding: 4px 8px;
+  }
+  .role-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-right: 6px;
+  }
+  .response {
+    border-left: 4px solid var(--response-border);
+    padding: 6px 10px;
+    margin-top: 10px;
+  }
+  .error-banner {
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
+    color: #900;
+    padding: 6px 10px;
+    border-radius: 4px;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+<h1>cxql-harness conversation log</h1>
+<div id="meta"></div>
+<div id="root"></div>
+
+<script type="application/json" id="exchanges-data">__CXQL_HARNESS_EXCHANGES_JSON__</script>
+<script>
+(function () {
+  var raw = document.getElementById('exchanges-data').textContent || '[]';
+  var exchanges;
+  try {
+    exchanges = JSON.parse(raw);
+  } catch (e) {
+    exchanges = [];
+  }
+  if (!Array.isArray(exchanges)) exchanges = [];
+
+  var root = document.getElementById('root');
+  document.getElementById('meta').textContent = exchanges.length + ' exchange(s)';
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined && text !== null) e.textContent = text;
+    return e;
+  }
+
+  // A collapsible block: header (click to toggle) + body, hidden unless startOpen.
+  function section(title, bodyBuilder, startOpen) {
+    var wrap = el('div', 'section');
+    var header = el('div', 'section-header' + (startOpen ? ' open' : ''), title);
+    header.dataset.toggle = 'section';
+    var body = el('div', 'section-body');
+    if (!startOpen) body.hidden = true;
+    bodyBuilder(body);
+    wrap.appendChild(header);
+    wrap.appendChild(body);
+    return wrap;
+  }
+
+  // A single truncated line that unwraps to full text in place on click.
+  function truncLine(text) {
+    var row = el('div', 'trunc', text);
+    row.dataset.toggle = 'line';
+    return row;
+  }
+
+  function label(text) {
+    return el('div', 'subsection-label', text);
+  }
+
+  function renderChangelog(ex) {
+    var entries = ex.ChangelogEntries;
+    var count = Array.isArray(entries) ? entries.length : 0;
+    return section('Changelog (' + count + ' entries)', function (body) {
+      if (entries != null && entries.length > 0) {
+        var list = el('div', 'line-list');
+        entries.forEach(function (c) {
+          list.appendChild(truncLine((c.Purpose || '') + ' — ' + (c.Summary || '') + (c.Call ? ' [' + c.Call + ']' : '')));
+        });
+        body.appendChild(list);
+      } else if (ex.Changelog) {
+        var pre = el('pre', null, ex.Changelog);
+        body.appendChild(pre);
+      } else {
+        body.appendChild(el('div', 'empty-hint', '(none)'));
+      }
+    }, false);
+  }
+
+  function renderNotes(ex) {
+    var entries = ex.NoteEntries;
+    var count = Array.isArray(entries) ? entries.length : 0;
+    return section('Notes (' + count + ' entries)', function (body) {
+      if (entries != null && entries.length > 0) {
+        var list = el('div', 'line-list');
+        entries.forEach(function (n) {
+          list.appendChild(truncLine('[' + (n.Type || '') + '] ' + (n.ID || '') + ': ' + (n.Content || '')));
+        });
+        body.appendChild(list);
+      } else if (ex.Notes) {
+        var pre = el('pre', null, ex.Notes);
+        body.appendChild(pre);
+      } else {
+        body.appendChild(el('div', 'empty-hint', '(none)'));
+      }
+    }, false);
+  }
+
+  function renderTools(ex) {
+    if (!ex.Tools || ex.Tools.length === 0) return null;
+    return section('Available tools (' + ex.Tools.length + ')', function (body) {
+      ex.Tools.forEach(function (t) {
+        var row = el('div', 'tool-row');
+        var name = el('span', 'tool-name', t.Name || '');
+        var desc = truncLine(t.Description || '');
+        row.appendChild(name);
+        row.appendChild(desc);
+        body.appendChild(row);
+      });
+    }, false);
+  }
+
+  function renderToolCallRow(tc) {
+    var row = el('div', 'tool-row');
+    var header = el('div', null);
+    header.dataset.toggle = 'section';
+    header.className = 'section-header';
+    header.style.background = 'transparent';
+    header.textContent = (tc.Name || '(unnamed tool)') + ' — args';
+    var body = el('pre', 'section-body');
+    body.hidden = true;
+    try {
+      body.textContent = JSON.stringify(tc.Args, null, 2);
+    } catch (e) {
+      body.textContent = String(tc.Args);
+    }
+    row.appendChild(header);
+    row.appendChild(body);
+    return row;
+  }
+
+  function renderMessages(ex) {
+    if (!ex.Messages || ex.Messages.length === 0) return null;
+    return section('Scratch messages (' + ex.Messages.length + ')', function (body) {
+      ex.Messages.forEach(function (m) {
+        var card = el('div', 'msg-card');
+        var preview = (m.Content || '').slice(0, 160);
+        card.appendChild(section((m.Role || '?') + ': ' + (preview || '(empty)'), function (innerBody) {
+          if (m.Content) innerBody.appendChild(el('pre', null, m.Content));
+          if (m.ToolCalls && m.ToolCalls.length > 0) {
+            m.ToolCalls.forEach(function (tc) {
+              innerBody.appendChild(renderToolCallRow(tc));
+            });
+          }
+        }, false));
+        body.appendChild(card);
+      });
+    }, false);
+  }
+
+  var systemShown = false;
+
+  function renderExchange(ex) {
+    var turn = el('div', 'turn');
+    turn.appendChild(el('div', 'turn-header', '#' + ex.Seq + ' — ' + ex.CallSite + ' — ' + ex.Timestamp));
+
+    turn.appendChild(label('Request'));
+
+    if (ex.System) {
+      var startOpen = !systemShown;
+      if (startOpen) systemShown = true;
+      turn.appendChild(section('System Prompt', function (body) {
+        body.appendChild(el('pre', null, ex.System));
+      }, startOpen));
+    }
+
+    turn.appendChild(renderChangelog(ex));
+    turn.appendChild(renderNotes(ex));
+
+    var toolsSection = renderTools(ex);
+    if (toolsSection) turn.appendChild(toolsSection);
+
+    turn.appendChild(section('Prompt', function (body) {
+      body.appendChild(el('pre', null, ex.Prompt || ''));
+    }, true));
+
+    var messagesSection = renderMessages(ex);
+    if (messagesSection) turn.appendChild(messagesSection);
+
+    turn.appendChild(label('Response'));
+    var resp = el('div', 'response');
+    var hasContent = ex.Response && ex.Response.Content;
+    var hasToolCalls = ex.Response && ex.Response.ToolCalls && ex.Response.ToolCalls.length > 0;
+    if (hasContent) resp.appendChild(el('pre', null, ex.Response.Content));
+    if (hasToolCalls) {
+      ex.Response.ToolCalls.forEach(function (tc) {
+        resp.appendChild(renderToolCallRow(tc));
+      });
+    }
+    if (!hasContent && !hasToolCalls && !ex.Error) {
+      resp.appendChild(el('div', 'empty-hint', '(empty response)'));
+    }
+    if (ex.Error) {
+      resp.appendChild(el('div', 'error-banner', 'Error: ' + ex.Error));
+    }
+    turn.appendChild(resp);
+
+    return turn;
+  }
+
+  if (exchanges.length === 0) {
+    root.appendChild(el('div', 'empty-hint', 'No exchanges recorded yet.'));
+  } else {
+    exchanges.forEach(function (ex) {
+      root.appendChild(renderExchange(ex));
+    });
+  }
+
+  document.addEventListener('click', function (e) {
+    var target = e.target.closest('[data-toggle]');
+    if (!target) return;
+    if (target.dataset.toggle === 'section') {
+      var body = target.nextElementSibling;
+      if (body) body.hidden = !body.hidden;
+      target.classList.toggle('open');
+    } else if (target.dataset.toggle === 'line') {
+      target.classList.toggle('expanded');
+    }
+  });
+})();
+</script>
+</body>
+</html>

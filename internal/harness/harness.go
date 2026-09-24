@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/cxpsemea/cxql-harness/internal/llm"
 	"github.com/cxpsemea/cxql-harness/internal/tooldef"
@@ -16,6 +17,11 @@ import (
 
 // messagesDir is where per-call request/response dumps are written, see chat().
 const messagesDir = "messages"
+
+// legacyTxtDumps re-enables the old flat messages/{n}_in.txt and
+// messages/{n}_out.txt dumps (via dumpMessageFile) alongside the newer
+// sectioned messages/{n}.json log. Off by default.
+const legacyTxtDumps = false
 
 // Harness drives the false-positive resolution loop.
 type Harness struct {
@@ -28,7 +34,8 @@ type Harness struct {
 	changelog      *Changelog
 	verbose        bool
 	msgCount       int
-	infoStreak     int // consecutive get_query_info/run_query calls with no mutating tool call in between
+	infoStreak     int       // consecutive get_query_info/run_query calls with no mutating tool call in between
+	exchanges      []Exchange // full transcript of LLM exchanges, for the messages/{n}.json log and viewer.html
 }
 
 // Info-gathering tool calls (get_query_info, run_query) don't change state; a weak
@@ -46,7 +53,7 @@ func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int, 
 	if err := resetMessagesDir(messagesDir); err != nil {
 		logger.Warnf("Failed to reset messages dir %s: %s", messagesDir, err)
 	}
-	return &Harness{
+	h := &Harness{
 		logger:         logger,
 		mcp:            mcpClient,
 		llm:            llmClient,
@@ -55,7 +62,10 @@ func New(logger *logrus.Logger, mcpClient mcpi, llmClient llm.LLM, maxIter int, 
 		notepad:        NewNotepad(),
 		changelog:      NewChangelog(),
 		verbose:        verbose,
+		exchanges:      []Exchange{},
 	}
+	h.writeViewer() // avoid a stale prior run's viewer.html surviving an early failure
+	return h
 }
 
 // resetMessagesDir ensures dir exists and is empty, so each run starts fresh.
@@ -188,7 +198,7 @@ func (h *Harness) loopStep(ctx context.Context, messages *MessageHistory) error 
 	var resp llm.Response
 	err := h.withRetries("choose next action", 3, func() error {
 		var chatErr error
-		resp, chatErr = h.chat(ctx, messages.History(prompt, FilterAll.Except(HistoryFilter{Messages: true})), tools)
+		resp, chatErr = h.chatLogged(ctx, CallSiteChooseAction, messages, prompt, FilterAll.Except(HistoryFilter{Messages: true}), tools)
 		if chatErr != nil {
 			return fmt.Errorf("LLM call: %w", chatErr)
 		}
@@ -414,7 +424,7 @@ The source code for %s is:
 `, call.Name, toolResult, query, code))
 
 		err = h.withRetries("Generate fixed query "+query, 3, func() error {
-			resp, err = h.chat(ctx, hist.History(promptDebugQuery, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false})), lastToolDef)
+			resp, err = h.chatLogged(ctx, CallSiteDebugQuery, &hist, promptDebugQuery, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false}), lastToolDef)
 			if err != nil {
 				return fmt.Errorf("LLM call: %w", err)
 			}
@@ -460,7 +470,7 @@ func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory, prevC
 	var resp llm.Response
 	err := h.withRetries("summarize tool result", 3, func() error {
 		var chatErr error
-		resp, chatErr = h.chat(ctx, messages.History(prompt, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false})), notepadTool())
+		resp, chatErr = h.chatLogged(ctx, CallSiteAfterTool, messages, prompt, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false}), notepadTool())
 		if chatErr != nil {
 			return fmt.Errorf("LLM call: %w", chatErr)
 		}
@@ -564,7 +574,15 @@ func strArg(args map[string]any, key string) string {
 	return ""
 }
 
-func (h *Harness) chat(ctx context.Context, messages []llm.Message, tools []llm.ToolDef) (llm.Response, error) {
+// chatLogged flattens hist via History(prompt, filter), performs the LLM
+// call, and records a structurally-sectioned Exchange (messages/{n}.json +
+// viewer.html) reflecting exactly what was sent — reading straight from
+// hist's own fields rather than e.g. h.changelog/h.notepad, so the log stays
+// faithful even at call sites (like handleQueryError) whose hist may not
+// mirror the harness's real accumulated state.
+func (h *Harness) chatLogged(ctx context.Context, callSite string, hist *MessageHistory, prompt string, filter HistoryFilter, tools []llm.ToolDef) (llm.Response, error) {
+	messages := hist.History(prompt, filter)
+
 	str := strings.Builder{}
 	for _, msg := range messages {
 		min := 50
@@ -578,10 +596,12 @@ func (h *Harness) chat(ctx context.Context, messages []llm.Message, tools []llm.
 	h.msgCount++
 	h.logger.Infof("LLM Receives #%d:\n------------\n%s\n==============\n\n", h.msgCount, str.String())
 
-	h.dumpMessageFile(h.msgCount, "in", struct {
-		Messages []llm.Message
-		Tools    []llm.ToolDef
-	}{messages, tools})
+	if legacyTxtDumps {
+		h.dumpMessageFile(h.msgCount, "in", struct {
+			Messages []llm.Message
+			Tools    []llm.ToolDef
+		}{messages, tools})
+	}
 
 	response, err := h.llm.Chat(ctx, messages, tools)
 	if err != nil {
@@ -591,7 +611,30 @@ func (h *Harness) chat(ctx context.Context, messages []llm.Message, tools []llm.
 	msg, _ := json.MarshalIndent(response, "", "  ")
 	h.logger.Infof("LLM Responds #%d:\n------------\n%s\n==============\n\n", h.msgCount, msg)
 
-	h.dumpMessageFile(h.msgCount, "out", response)
+	if legacyTxtDumps {
+		h.dumpMessageFile(h.msgCount, "out", response)
+	}
+
+	ex := Exchange{
+		Seq:              h.msgCount,
+		CallSite:         callSite,
+		Timestamp:        time.Now(),
+		System:           hist.system.Content,
+		Changelog:        hist.changelog.Content,
+		ChangelogEntries: parseJSONAfterPrefixLine[ToolCallEntry](hist.changelog.Content),
+		Notes:            hist.notes.Content,
+		NoteEntries:      parseJSONAfterPrefixLine[Note](hist.notes.Content),
+		Prompt:           prompt,
+		Tools:            tools,
+		Response:         response,
+	}
+	if filter.Messages {
+		ex.Messages = hist.messages
+	}
+	if err != nil {
+		ex.Error = err.Error()
+	}
+	h.recordExchange(ex)
 
 	return response, err
 }
