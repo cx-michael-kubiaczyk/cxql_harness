@@ -85,6 +85,7 @@ func main() {
 
 		h = harness.New(logger, mcp.NewMCP(cx1client, logger), llmClient, *maxIter, false)
 	} else {
+		log.Println("Initializing test clients")
 		h = harness.New(logger, harness.NewTestMCP(), llm.NewTestLLM(logger), *maxIter, false)
 	}
 

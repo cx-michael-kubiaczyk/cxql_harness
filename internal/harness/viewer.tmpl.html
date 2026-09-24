@@ -55,6 +55,9 @@
     border-radius: 4px;
     background: #f0f0f0;
     display: inline-block;
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
   }
   .section-header:hover { background: #e6e6e6; }
   .section-header::before { content: "\25b8 "; }
@@ -65,7 +68,7 @@
     border-left: 2px solid var(--border);
   }
   .section-body[hidden] { display: none; }
-  .section-body pre {
+  pre {
     white-space: pre-wrap;
     word-break: break-word;
     margin: 0;
@@ -230,13 +233,20 @@
     }, false);
   }
 
+  function toolCallLabel(tc) {
+    var args = tc.Args || {};
+    if (args.purpose) return args.purpose;
+    if (args.summary) return args.summary;
+    return '(no purpose given)';
+  }
+
   function renderToolCallRow(tc) {
     var row = el('div', 'tool-row');
     var header = el('div', null);
     header.dataset.toggle = 'section';
     header.className = 'section-header';
     header.style.background = 'transparent';
-    header.textContent = (tc.Name || '(unnamed tool)') + ' — args';
+    header.textContent = (tc.Name || '(unnamed tool)') + ' — ' + toolCallLabel(tc);
     var body = el('pre', 'section-body');
     body.hidden = true;
     try {

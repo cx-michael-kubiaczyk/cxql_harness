@@ -32,7 +32,8 @@ const cxqlSyntaxReminder = "CxQL query code is always written in C#, regardless 
 	"A query body is typically a single expression assigned to `result`, built from calls to other queries and CxList methods, e.g.: result = Common_Medium_Threat.Missing_HSTS_Header().SanitizeCxList(Find_HSTS_Sanitize()); It is not a full class, namespace, or function/method declaration. " +
 	"Never switch to JavaScript or another language to work around a compiler error. " +
 	"Only call functions and methods you have actually seen returned by get_query_info or run_query for this or a related query (e.g. SanitizeCxList, Find_HSTS_Sanitize) — never invent a plausible-sounding function name (e.g. Find_Http_Response, GetMembers) that you have not directly observed in a tool result; if you are not sure a helper exists, look it up first instead of guessing. " +
-	"If get_query_info reports a query as not found under one language, that does not mean the query doesn't exist — shared queries such as Common_* groups are often only registered under the special language \"Common\" rather than the scanned source language; try that before concluding a base query is missing or unfixable."
+	"If get_query_info reports a query as not found under one language, that does not mean the query doesn't exist — shared queries such as Common_* groups are often only registered under the special language \"Common\" rather than the scanned source language; try that before concluding a base query is missing or unfixable. " +
+	"Never create, edit, or save an override for a Common-language query, at any level — Common-language queries are shared across every scanned source language, so changing one to fix this error would affect unrelated findings too. Fix the language-specific query that calls it instead."
 
 // promptNudgeAction is used once infoStreakNudge consecutive cycles have
 // called only get_query_info/run_query, to push the model toward acting on

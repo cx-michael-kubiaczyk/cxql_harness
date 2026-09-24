@@ -145,6 +145,7 @@ When addressing false-positive results in a finding, the process follows these s
 7. Repeat the process as needed until the false positive is removed.
 
 Query changes are restricted to the Application level for compliance reasons: you must never create, edit, or save Project-level query overrides, and Product-level queries cannot be modified at all.
+Queries under the special language "Common" (e.g. Common_Medium_Threat.*) are shared helper queries used across every scanned source language, not just the one in this finding — you must never create, edit, or save an override for a Common-language query, at any level. If a Common-language query's behavior needs to change to address the false positive, override the language-specific query that calls it instead (e.g. javascript.Group.Query, not Common.Group.Query).
 `,
 	)
 	if strings.TrimSpace(userPrompt) != "" {
@@ -412,6 +413,13 @@ func (h *Harness) handleQueryError(ctx context.Context, messages *MessageHistory
 		} else {
 			hist.SetSystem(cxqlSyntaxReminder + "Update the code to address any errors.")
 		}
+		// Notes carry the model's own current reasoning (e.g. "this helper
+		// doesn't exist") which is directly relevant to fixing a compile
+		// error; the changelog is excluded below as a much larger, less
+		// directly useful audit trail for this narrow, mechanical retry loop.
+		// Set on every attempt (not just once) since CloneHistory() above
+		// replaces hist wholesale and would otherwise wipe this out.
+		hist.SetNotes(h.getNotes())
 		hist.AppendToolResult(call.Name, fmt.Sprintf(`The call to %s returned the following:
 `+"```"+`
 %s
@@ -424,7 +432,7 @@ The source code for %s is:
 `, call.Name, toolResult, query, code))
 
 		err = h.withRetries("Generate fixed query "+query, 3, func() error {
-			resp, err = h.chatLogged(ctx, CallSiteDebugQuery, &hist, promptDebugQuery, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false}), lastToolDef)
+			resp, err = h.chatLogged(ctx, CallSiteDebugQuery, &hist, promptDebugQuery, FilterAll.Except(HistoryFilter{Changelog: true}), lastToolDef)
 			if err != nil {
 				return fmt.Errorf("LLM call: %w", err)
 			}
@@ -470,7 +478,7 @@ func (h *Harness) afterTool(ctx context.Context, messages *MessageHistory, prevC
 	var resp llm.Response
 	err := h.withRetries("summarize tool result", 3, func() error {
 		var chatErr error
-		resp, chatErr = h.chatLogged(ctx, CallSiteAfterTool, messages, prompt, FilterAll.Except(HistoryFilter{Changelog: false, Notes: false}), notepadTool())
+		resp, chatErr = h.chatLogged(ctx, CallSiteAfterTool, messages, prompt, FilterAll.Except(HistoryFilter{Changelog: true}), notepadTool())
 		if chatErr != nil {
 			return fmt.Errorf("LLM call: %w", chatErr)
 		}
@@ -615,18 +623,29 @@ func (h *Harness) chatLogged(ctx context.Context, callSite string, hist *Message
 		h.dumpMessageFile(h.msgCount, "out", response)
 	}
 
+	// Every field below is gated on the same filter bit that decides whether
+	// hist.History(...) actually put that section into the request — the log
+	// must reflect exactly what was sent, not merely what hist happens to
+	// hold (e.g. afterTool's Changelog is excluded from the request but
+	// hist.changelog.Content is still populated from an earlier iteration).
 	ex := Exchange{
-		Seq:              h.msgCount,
-		CallSite:         callSite,
-		Timestamp:        time.Now(),
-		System:           hist.system.Content,
-		Changelog:        hist.changelog.Content,
-		ChangelogEntries: parseJSONAfterPrefixLine[ToolCallEntry](hist.changelog.Content),
-		Notes:            hist.notes.Content,
-		NoteEntries:      parseJSONAfterPrefixLine[Note](hist.notes.Content),
-		Prompt:           prompt,
-		Tools:            tools,
-		Response:         response,
+		Seq:       h.msgCount,
+		CallSite:  callSite,
+		Timestamp: time.Now(),
+		Prompt:    prompt,
+		Tools:     tools,
+		Response:  response,
+	}
+	if filter.System {
+		ex.System = hist.system.Content
+	}
+	if filter.Changelog {
+		ex.Changelog = hist.changelog.Content
+		ex.ChangelogEntries = parseJSONAfterPrefixLine[ToolCallEntry](hist.changelog.Content)
+	}
+	if filter.Notes {
+		ex.Notes = hist.notes.Content
+		ex.NoteEntries = parseJSONAfterPrefixLine[Note](hist.notes.Content)
 	}
 	if filter.Messages {
 		ex.Messages = hist.messages
