@@ -30,8 +30,9 @@ func notepadTool() []llm.ToolDef {
 						},
 					},
 					"notes_to_delete": map[string]any{
-						"type":  "array",
-						"items": map[string]any{"type": "string"},
+						"type":        "array",
+						"description": "IDs of notes to remove. Always include a Task note's ID here once the action it describes has been executed — a completed Task must not remain in the notepad.",
+						"items":       map[string]any{"type": "string"},
 					},
 					"notes_to_update": map[string]any{
 						"type": "array",
