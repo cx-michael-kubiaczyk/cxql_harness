@@ -12,6 +12,16 @@ type mcpi interface {
 	// Get the current Project and Application
 	GetCurrentProjectID() string
 	GetCurrentApplicationID() string
+	GetCurrentProjectName() string
+	GetCurrentApplicationName() string
+
+	// returns the Language.Group.QueryName of the query that produced the
+	// target finding for this session
+	GetCurrentFindingQuery() string
+
+	// returns a full before/after report of every query modified (saved and
+	// not yet restored) this session, or a "none" message if nothing was modified
+	QueryChangesReport() string
 
 	// Prepare a preset with only the current finding included
 	//ConfigureCustomPreset(presetName string) string

@@ -47,6 +47,22 @@ func (m *TestMCP) GetCurrentProjectID() string {
 	return "123"
 }
 
+func (m *TestMCP) GetCurrentApplicationName() string {
+	return "Test-Application"
+}
+
+func (m *TestMCP) GetCurrentProjectName() string {
+	return "Test-Project"
+}
+
+func (m *TestMCP) GetCurrentFindingQuery() string {
+	return "javascript.JavaScript_Medium_Threat.Missing_HSTS_Header"
+}
+
+func (m *TestMCP) QueryChangesReport() string {
+	return "No queries were modified in this session."
+}
+
 func (m *TestMCP) GetQueryCode(level, lang, group, name string) string {
 	return "some code"
 }

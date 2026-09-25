@@ -133,9 +133,11 @@
 <body>
 <h1>cxql-harness conversation log</h1>
 <div id="meta"></div>
+<div id="run-info"></div>
 <div id="root"></div>
 
 <script type="application/json" id="exchanges-data">__CXQL_HARNESS_EXCHANGES_JSON__</script>
+<script type="application/json" id="meta-data">__CXQL_HARNESS_META_JSON__</script>
 <script>
 (function () {
   var raw = document.getElementById('exchanges-data').textContent || '[]';
@@ -147,8 +149,21 @@
   }
   if (!Array.isArray(exchanges)) exchanges = [];
 
+  var metaRaw = document.getElementById('meta-data').textContent || '{}';
+  var meta;
+  try {
+    meta = JSON.parse(metaRaw);
+  } catch (e) {
+    meta = {};
+  }
+
   var root = document.getElementById('root');
-  document.getElementById('meta').textContent = exchanges.length + ' exchange(s)';
+  document.getElementById('meta').textContent =
+    'Application: ' + (meta.ApplicationName || '?') + ' (' + (meta.ApplicationID || '?') + ')' +
+    ' | Project: ' + (meta.ProjectName || '?') + ' (' + (meta.ProjectID || '?') + ')' +
+    ' | ' + exchanges.length + ' exchange(s)';
+
+  document.getElementById('run-info').appendChild(renderRunInfo(meta));
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -179,6 +194,58 @@
 
   function label(text) {
     return el('div', 'subsection-label', text);
+  }
+
+  function linkRow(labelText, url) {
+    var row = el('div', null);
+    row.appendChild(document.createTextNode(labelText + ': '));
+    if (url) {
+      var a = el('a', null, url);
+      a.href = url;
+      a.target = '_blank';
+      row.appendChild(a);
+    } else {
+      row.appendChild(el('span', 'empty-hint', '(none)'));
+    }
+    return row;
+  }
+
+  function linkListRow(labelText, urls) {
+    var row = el('div', null);
+    row.appendChild(document.createTextNode(labelText + ': '));
+    if (urls && urls.length > 0) {
+      urls.forEach(function (u, i) {
+        if (i > 0) row.appendChild(document.createTextNode(', '));
+        var a = el('a', null, u);
+        a.href = u;
+        a.target = '_blank';
+        row.appendChild(a);
+      });
+    } else {
+      row.appendChild(el('span', 'empty-hint', '(none)'));
+    }
+    return row;
+  }
+
+  function idListRow(labelText, ids) {
+    var text = labelText + ': ' + ((ids && ids.length > 0) ? ids.join(', ') : '(none)');
+    return el('div', null, text);
+  }
+
+  function renderRunInfo(meta) {
+    var wrap = el('div', 'turn');
+    wrap.appendChild(el('div', 'turn-header', 'Run info'));
+    var findingRow = el('div', null);
+    findingRow.appendChild(document.createTextNode('Finding: '));
+    findingRow.appendChild(el('strong', null, meta.FindingQuery || '?'));
+    wrap.appendChild(findingRow);
+    wrap.appendChild(linkRow('FP', meta.FindingURL));
+    wrap.appendChild(linkListRow('TP', meta.TPList));
+    wrap.appendChild(idListRow('TN', meta.TNList));
+    wrap.appendChild(section('Vulnerable code snippet', function (body) {
+      body.appendChild(el('pre', null, meta.CodeSnippet || '(none)'));
+    }, false));
+    return wrap;
   }
 
   function renderChangelog(ex) {
@@ -327,6 +394,10 @@
 
     return turn;
   }
+
+  root.appendChild(section('Query changes', function (body) {
+    body.appendChild(el('pre', null, meta.QueryChanges || '(none)'));
+  }, false));
 
   if (exchanges.length === 0) {
     root.appendChild(el('div', 'empty-hint', 'No exchanges recorded yet.'));

@@ -36,6 +36,12 @@ type Harness struct {
 	msgCount       int
 	infoStreak     int        // consecutive get_query_info/run_query calls with no mutating tool call in between
 	exchanges      []Exchange // full transcript of LLM exchanges, for the messages/{n}.json log and viewer.html
+
+	// Run parameters, captured in Run() for display in viewer.html; not used
+	// for any control-flow decisions.
+	findingURL string
+	tpList     []string
+	tnList     []string
 }
 
 // Info-gathering tool calls (get_query_info, run_query) don't change state; a weak
@@ -86,6 +92,9 @@ const (
 // Run initialises a session for the given finding URL and drives the reasoning
 // loop until the finding is resolved or maxIter is reached.
 func (h *Harness) Run(ctx context.Context, findingURL, userPrompt string, TPList, TNList []string) error {
+	h.findingURL = findingURL
+	h.tpList = TPList
+	h.tnList = TNList
 	if err := h.initSession(ctx, findingURL, TPList, TNList); err != nil {
 		return fmt.Errorf("init session: %s", err)
 	}
@@ -102,7 +111,7 @@ func (h *Harness) initSession(_ context.Context, findingURL string, TPList, TNLi
 
 // runLoop is the top-level state machine. Each iteration is one LLM call that
 // produces either a tool invocation or a final text answer.
-func (h *Harness) runLoop(ctx context.Context, userPrompt string) error {
+func (h *Harness) runLoop(ctx context.Context, userPrompt string) (err error) {
 	/*
 		The MCP server manages the state of an application/environment
 		Some properties of the environment do not change:
@@ -153,19 +162,34 @@ Queries under the special language "Common" (e.g. Common_Medium_Threat.*) are sh
 	}
 	messages.SetSystem(system)
 
+	// Log a closing summary — which Application/Project the audit environment
+	// targeted, the last-known status, and every CxQL query changed — on every
+	// exit path (resolved, exhausted iterations, or a hard error), since
+	// knowing "which app, what changed" matters just as much when a run fails.
+	var status string
+	defer func() {
+		s := status
+		if s == "" {
+			s = "(no status recorded — run failed before a status check completed)"
+		}
+		h.logger.Infof("Run finished. Application: %s (%s). Project: %s (%s).\n%s\nQuery changes:\n%s",
+			h.mcp.GetCurrentApplicationName(), h.mcp.GetCurrentApplicationID(),
+			h.mcp.GetCurrentProjectName(), h.mcp.GetCurrentProjectID(),
+			s, h.mcp.QueryChangesReport())
+	}()
+
 	for i := 0; i < h.maxIter; i++ {
 		messages.SetChangelog(h.getChangelog())
 		messages.SetNotes(h.getNotes())
-		err := h.loopStep(ctx, &messages)
-		if err != nil {
+		if err = h.loopStep(ctx, &messages); err != nil {
 			return fmt.Errorf("failed step: %s", err)
 		}
-		status, passed, err := h.TestsPassed()
+		var passed bool
+		status, passed, err = h.TestsPassed()
 		if err != nil {
 			return fmt.Errorf("check tests passed: %w", err)
 		}
 		if passed {
-			h.logger.Info(status)
 			return nil
 		}
 	}
